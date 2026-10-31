@@ -27,6 +27,7 @@ public sealed class MainForm : Form
         new GitRemoteResolver(cacheDuration: TimeSpan.FromMinutes(10)));
 
     private string? _lastViewJson;
+    private ConductorView? _lastView;
     private bool _pageReady;
 
     public MainForm()
@@ -99,11 +100,16 @@ public sealed class MainForm : Form
             }
             catch (Exception ex)
             {
-                // Never let one bad refresh stop polling: show offline and try again.
+                // Never let one bad refresh stop polling. This is our fault, not MT being down:
+                // keep the last cards and say so, rather than claiming "MT offline".
                 System.Diagnostics.Trace.TraceError($"MT Conductor refresh failed: {ex}");
-                view = new ConductorView(false, DateTime.Now, null, [], 0);
+                var warning = $"conductor error: {ex.GetType().Name} (see trace log)";
+                view = _lastView is { MtOnline: true } last
+                    ? last with { Warnings = [.. last.Warnings ?? [], warning] }
+                    : new ConductorView(true, DateTime.Now, null, [], 0, [warning]);
             }
 
+            _lastView = view;
             Publish(view);
 
             offlineStreak = view.MtOnline ? 0 : offlineStreak + 1;

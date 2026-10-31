@@ -32,6 +32,7 @@ public sealed class ConductorPoller
     private string? _gitHubLogin;
 
     private IReadOnlyList<MtTask> _lastTasks = [];
+    private bool _haveTasks;
 
     /// <summary>
     /// Joins the in_progress and todo lists. They're fetched in parallel, so a task that changes
@@ -103,9 +104,14 @@ public sealed class ConductorPoller
         // A failed task fetch must not look like "no tasks": reuse the last good list instead.
         var stale = new List<string>();
         if (inProgressTask.Result is { } inProgress && todoTask.Result is { } todo)
+        {
             _lastTasks = MergeTasks(inProgress, todo);
+            _haveTasks = true;
+        }
         else
-            stale.Add("tasks unavailable (showing last known)");
+        {
+            stale.Add(_haveTasks ? "tasks unavailable (showing last known)" : "tasks unavailable");
+        }
         var tasks = _lastTasks;
 
         // Notification times come from SQLite datetime('now'): UTC without an offset.

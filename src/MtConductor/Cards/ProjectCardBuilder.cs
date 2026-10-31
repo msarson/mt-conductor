@@ -123,6 +123,7 @@ public static class ProjectCardBuilder
         var warnings = new List<string>(s.StaleSources ?? []);
         if (s.Inbox is null) warnings.Add("inbox unavailable");
         if (s.Notifications is null) warnings.Add("notifications unavailable");
+        if (s.Terminals is null) warnings.Add("terminals unavailable");
 
         return new ConductorView(true, s.Now, s.RemoteMode, cards, unmatched, warnings);
     }

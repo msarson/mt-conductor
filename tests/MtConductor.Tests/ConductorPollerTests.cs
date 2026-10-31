@@ -207,6 +207,19 @@ public class ConductorPollerTests
         Assert.Contains("tasks unavailable (showing last known)", view.Warnings!);
     }
 
+    [Fact]
+    public async Task Task_failure_on_first_poll_does_not_claim_last_known()
+    {
+        var (poller, _, _) = Create(pq => pq.StartsWith("/api/tasks?", StringComparison.Ordinal)
+            ? (HttpStatusCode.InternalServerError, "")
+            : HealthyMt(pq));
+
+        var view = await poller.RefreshAsync(CancellationToken.None);
+
+        Assert.Contains("tasks unavailable", view.Warnings!);
+        Assert.DoesNotContain("tasks unavailable (showing last known)", view.Warnings!);
+    }
+
     [Theory]
     [InlineData(@"C:\work\proj", true)]
     [InlineData("C:/work/proj", true)]

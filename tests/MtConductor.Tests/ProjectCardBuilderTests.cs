@@ -126,7 +126,7 @@ public class ProjectCardBuilderTests
             StaleSources = ["tasks unavailable (showing last known)"],
         });
         Assert.Equal(
-            ["tasks unavailable (showing last known)", "inbox unavailable", "notifications unavailable"],
+            ["tasks unavailable (showing last known)", "inbox unavailable", "notifications unavailable", "terminals unavailable"],
             view.Warnings!);
     }
 
