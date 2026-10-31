@@ -11,6 +11,7 @@
   <header class="bar">
     <h1>MT Conductor</h1>
     <div class="bar-status">
+      <button type="button" id="carry" class="carry" aria-pressed="false" hidden>Carry on without me</button>
       <span id="remote" class="pill" hidden></span>
       <span id="status" class="pill">Connecting to MultiTerminal…</span>
     </div>
@@ -37,8 +38,7 @@
       <p class="prs-line"><span class="prs"></span><span class="questions"></span></p>
       <div class="actions">
         <button type="button" class="open">Open</button>
-        <button type="button" disabled title="Coming in phase 2 (uses MT's remote mode)">Carry on without me</button>
-        <button type="button" disabled title="Coming in phase 2">Pause</button>
+        <button type="button" disabled title="MT has no way to pause one project's agent yet.">Pause</button>
       </div>
       <p class="open-hint" hidden></p>
     </article>

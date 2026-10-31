@@ -47,7 +47,15 @@ public sealed record ConductorView(
     bool? RemoteMode,
     IReadOnlyList<ProjectCard> Cards,
     int UnmatchedQuestions,
-    IReadOnlyList<string>? Warnings = null);   // e.g. "inbox unavailable": counts may be incomplete
+    IReadOnlyList<string>? Warnings = null,    // e.g. "inbox unavailable": counts may be incomplete
+    RemoteChange? LastRemoteChange = null);
+
+/// <summary>
+/// The last time remote mode flipped, and who did it: <see cref="ByConductor"/> when the
+/// Owner used the toggle here, otherwise MT did it (desk activity, idle timer, phone, or MT's
+/// own switch: the API doesn't say which).
+/// </summary>
+public sealed record RemoteChange(bool On, bool ByConductor, DateTime At);
 
 /// <summary>
 /// Turns one <see cref="ConductorSnapshot"/> into the cards the page renders. Pure and

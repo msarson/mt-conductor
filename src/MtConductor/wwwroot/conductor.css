@@ -65,6 +65,10 @@ body {
 }
 .pill.online { color: var(--ok); border-color: currentColor; }
 .pill.offline { color: var(--needs); border-color: currentColor; }
+.pill.remote-on { color: var(--accent); border-color: currentColor; }
+
+.bar .carry { border-radius: 999px; font-size: 12px; padding: 2px 12px; }
+.bar .carry[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
 
 .banner {
   margin: 12px 16px 0;

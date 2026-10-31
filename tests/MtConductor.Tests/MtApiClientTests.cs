@@ -150,4 +150,41 @@ public class MtApiClientTests
         Assert.Empty(MtJson.ParseChecklist(null));
         Assert.Empty(MtJson.ParseChecklist("not json"));
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Set_remote_mode_posts_enabled_without_origin_and_returns_confirmed_value(bool enabled)
+    {
+        string? sentBody = null;
+        var handler = new FakeHandler(req =>
+        {
+            sentBody = req.Content!.ReadAsStringAsync().Result;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent($$"""{"remote_mode":{{(enabled ? "true" : "false")}}}""", Encoding.UTF8, "application/json"),
+            };
+        });
+        var client = new MtApiClient(new HttpClient(handler) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) });
+
+        var result = await client.SetRemoteModeAsync(enabled, CancellationToken.None);
+
+        Assert.Equal(enabled, result);
+        var req = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, req.Method);
+        Assert.Equal("/api/remote-mode", req.RequestUri!.AbsolutePath);
+        Assert.False(req.Headers.Contains("Origin"));
+        Assert.Equal($$"""{"enabled":{{(enabled ? "true" : "false")}}}""", sentBody);
+    }
+
+    [Fact]
+    public async Task Set_remote_mode_returns_null_when_refused_or_offline()
+    {
+        var (refused, _) = ClientReturning(HttpStatusCode.Forbidden, """{"detail":"Origin not allowed"}""");
+        Assert.Null(await refused.SetRemoteModeAsync(true, CancellationToken.None));
+
+        var offline = new MtApiClient(new HttpClient(new FakeHandler(_ => throw new HttpRequestException("refused")))
+            { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) });
+        Assert.Null(await offline.SetRemoteModeAsync(true, CancellationToken.None));
+    }
 }
