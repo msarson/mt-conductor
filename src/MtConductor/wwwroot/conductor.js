@@ -34,7 +34,7 @@
       container.textContent = card.hasGitHubRepo ? "PRs: unknown" : "PRs: no GitHub repo found";
       container.title = card.hasGitHubRepo
         ? "Couldn't read PRs: gh missing or not logged in, or the repo isn't on GitHub."
-        : "No gitRepoUrl in MT and no origin remote in the project folder.";
+        : "No gitRepoUrl in MT and no upstream or origin remote in the project folder.";
       return;
     }
     const others = card.otherPullRequests > 0 ? ` +${card.otherPullRequests} by others` : "";
@@ -46,7 +46,7 @@
     for (const pr of card.pullRequests) {
       const a = document.createElement("a");
       a.href = pr.url;
-      a.title = [pr.title, pr.isDraft ? "draft" : null, pr.review ? pr.review.toLowerCase().replace("_", " ") : null, `checks: ${pr.checks}`]
+      a.title = [pr.title, pr.isDraft ? "draft" : null, pr.review ? pr.review.toLowerCase().replaceAll("_", " ") : null, `checks: ${pr.checks}`]
         .filter(Boolean).join(" · ");
       a.textContent = `#${pr.number}`;
       const glyph = CHECK_GLYPH[pr.checks] || "";
@@ -97,10 +97,13 @@
     }
 
     el.querySelector(".tasks").textContent =
-      `Tasks: ${card.inProgress} in progress · ${card.toDo} to do · ${plural(card.awaitingTest, "waiting for me to test", "waiting for me to test")}`;
+      `Tasks: ${card.inProgress} in progress · ${card.toDo} to do · ${card.awaitingTest} ready for me to test`;
 
     renderPrs(el.querySelector(".prs"), card);
-    el.querySelector(".questions").textContent = `Questions: ${card.questions}`;
+    const questions = el.querySelector(".questions");
+    questions.textContent = `Questions: ${card.questions}`;
+    questions.title = "Escalations plus permission requests/questions from the last 24 hours. "
+      + "MT only records the latter while remote mode is on, so at the desk check the project's panes too.";
 
     const hint = el.querySelector(".open-hint");
     hint.textContent = card.openHint;
@@ -117,7 +120,12 @@
     offlineEl.hidden = view.mtOnline;
     cardsEl.classList.toggle("stale", !view.mtOnline);
     statusEl.className = `pill ${view.mtOnline ? "online" : "offline"}`;
+    const warnings = (view.mtOnline && view.warnings) ? view.warnings : [];
     statusEl.textContent = view.mtOnline ? `MT online · updated ${timeText(view.updatedAt)}` : "MT offline";
+    if (warnings.length > 0) {
+      statusEl.className = "pill offline";
+      statusEl.textContent += ` · ${warnings.join(", ")}`;
+    }
 
     if (view.remoteMode === null || view.remoteMode === undefined) {
       remoteEl.hidden = true;

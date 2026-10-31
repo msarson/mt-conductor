@@ -71,10 +71,15 @@ public sealed class MainForm : Form
         core.Settings.IsStatusBarEnabled = false;
         core.WebMessageReceived += OnWebMessage;
         core.NewWindowRequested += OnNewWindowRequested;
+        core.NavigationStarting += (_, e) =>
+        {
+            // The page must never leave the app's own origin (it would inherit chrome.webview).
+            if (!IsAppOrigin(e.Uri)) e.Cancel = true;
+        };
 
         var wwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
         core.SetVirtualHostNameToFolderMapping("conductor.local", wwwroot, CoreWebView2HostResourceAccessKind.Deny);
-        core.Navigate("https://conductor.local/index.html");
+        core.Navigate(AppOrigin + "index.html");
     }
 
     // Runs on the UI thread: awaits resume on the WinForms SynchronizationContext.
@@ -91,6 +96,12 @@ public sealed class MainForm : Form
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 return;
+            }
+            catch (Exception ex)
+            {
+                // Never let one bad refresh stop polling: show offline and try again.
+                System.Diagnostics.Trace.TraceError($"MT Conductor refresh failed: {ex}");
+                view = new ConductorView(false, DateTime.Now, null, [], 0);
             }
 
             Publish(view);
@@ -117,8 +128,15 @@ public sealed class MainForm : Form
         if (_pageReady) _webView.CoreWebView2?.PostWebMessageAsJson(_lastViewJson);
     }
 
+    private const string AppOrigin = "https://conductor.local/";
+
+    private static bool IsAppOrigin(string? uri) =>
+        uri is not null && uri.StartsWith(AppOrigin, StringComparison.OrdinalIgnoreCase);
+
     private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        if (!IsAppOrigin(e.Source)) return;
+
         string? type;
         string? url = null;
         try
@@ -155,7 +173,14 @@ public sealed class MainForm : Form
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return;
         if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)) return;
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Couldn't open {uri}: {ex.Message}");
+        }
     }
 
     protected override void Dispose(bool disposing)

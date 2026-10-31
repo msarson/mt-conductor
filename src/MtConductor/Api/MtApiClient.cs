@@ -55,7 +55,7 @@ public sealed class MtApiClient
             $"api/tasks/inbox/{Uri.EscapeDataString(userId)}?unreadOnly=true&limit=200", ct))?.Messages;
 
     public Task<List<MtNotification>?> GetUnreadNotificationsAsync(CancellationToken ct) =>
-        GetAsync<List<MtNotification>>("api/notifications?unreadOnly=true", ct);
+        GetAsync<List<MtNotification>>("api/notifications?unreadOnly=true&limit=500", ct);
 
     public Task<List<MtTerminal>?> GetConnectedTerminalsAsync(CancellationToken ct) =>
         GetAsync<List<MtTerminal>>("api/messaging/terminals", ct);

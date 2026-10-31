@@ -30,7 +30,8 @@ public sealed class GitRemoteResolver
         if (_cache.TryGetValue(projectPath, out var hit) && hit.ExpiresUtc > DateTime.UtcNow) return hit.Url;
 
         string? url = null;
-        if (Directory.Exists(projectPath))
+        // Local paths only: a UNC or device path from MT would make us contact a remote host.
+        if (IsLocalPath(projectPath) && Directory.Exists(projectPath))
         {
             try
             {
@@ -54,6 +55,13 @@ public sealed class GitRemoteResolver
 
         _cache[projectPath] = (DateTime.UtcNow + _cacheDuration, url);
         return url;
+    }
+
+    internal static bool IsLocalPath(string path)
+    {
+        var p = path.Trim().Replace('/', '\\');
+        if (p.StartsWith(@"\\", StringComparison.Ordinal)) return false;   // UNC, \\?\, \\.\
+        return p.Length >= 3 && char.IsAsciiLetter(p[0]) && p[1] == ':' && p[2] == '\\';
     }
 
     // request is "remote|path" so tests can fake per-remote answers through one delegate.

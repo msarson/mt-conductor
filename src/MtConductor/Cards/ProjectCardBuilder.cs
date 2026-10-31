@@ -16,7 +16,8 @@ public sealed record ConductorSnapshot(
     IReadOnlyDictionary<string, IReadOnlyList<PullRequestInfo>?> PullRequests,
     bool? RemoteMode,
     DateTime Now,
-    string? GitHubLogin = null);   // gh's logged-in user; PRs by others are counted, not listed
+    string? GitHubLogin = null,    // gh's logged-in user; PRs by others are counted, not listed
+    IReadOnlyList<string>? StaleSources = null);   // sources that failed this tick (last good data reused)
 
 public sealed record PrBadge(int Number, string Title, string Url, string Checks, bool IsDraft, string? Review);
 
@@ -45,7 +46,8 @@ public sealed record ConductorView(
     DateTime UpdatedAt,
     bool? RemoteMode,
     IReadOnlyList<ProjectCard> Cards,
-    int UnmatchedQuestions);
+    int UnmatchedQuestions,
+    IReadOnlyList<string>? Warnings = null);   // e.g. "inbox unavailable": counts may be incomplete
 
 /// <summary>
 /// Turns one <see cref="ConductorSnapshot"/> into the cards the page renders. Pure and
@@ -54,6 +56,13 @@ public sealed record ConductorView(
 public static class ProjectCardBuilder
 {
     private const int LeftOffMaxLength = 160;
+
+    /// <summary>
+    /// Unread permission requests / questions older than this are ignored. MT only marks them
+    /// read from the phone, and in remote mode the same type also covers "agent went idle", so
+    /// without a cutoff the dot would stay lit for days.
+    /// </summary>
+    public static readonly TimeSpan QuestionMaxAge = TimeSpan.FromHours(24);
 
     public static ConductorView Build(ConductorSnapshot s)
     {
@@ -64,7 +73,11 @@ public static class ProjectCardBuilder
             .Where(p => !string.Equals(p.Status, "Archived", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        var tasksById = s.Tasks.ToDictionary(t => t.Id, StringComparer.OrdinalIgnoreCase);
+        // Tolerate duplicate or missing ids from the API rather than throwing.
+        var tasksById = new Dictionary<string, MtTask>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in s.Tasks)
+            if (!string.IsNullOrEmpty(t.Id)) tasksById.TryAdd(t.Id, t);
+        var cardIds = new HashSet<string>(projects.Select(p => p.Id), StringComparer.OrdinalIgnoreCase);
         var connected = new HashSet<string>(
             (s.Terminals ?? []).Where(t => t.IsConnected).Select(t => t.Name),
             StringComparer.OrdinalIgnoreCase);
@@ -75,7 +88,7 @@ public static class ProjectCardBuilder
         var unmatched = 0;
         foreach (var n in s.Notifications ?? [])
         {
-            if (!IsQuestion(n)) continue;
+            if (!IsQuestion(n, s.Now)) continue;
             var project = MatchProjectByPath(projects, n.Cwd);
             if (project is null) { unmatched++; continue; }
             if (!notificationsByProject.TryGetValue(project.Id, out var list))
@@ -88,7 +101,9 @@ public static class ProjectCardBuilder
         foreach (var m in s.Inbox ?? [])
         {
             if (!string.Equals(m.Type, "escalation", StringComparison.OrdinalIgnoreCase)) continue;
-            if (m.TaskId is not null && tasksById.TryGetValue(m.TaskId, out var t) && t.ProjectId is not null)
+            // Escalations for tasks we don't have, or in projects without a card (archived), count as unmatched.
+            if (m.TaskId is not null && tasksById.TryGetValue(m.TaskId, out var t)
+                && t.ProjectId is not null && cardIds.Contains(t.ProjectId))
                 escalationsByProject[t.ProjectId] = escalationsByProject.GetValueOrDefault(t.ProjectId) + 1;
             else
                 unmatched++;
@@ -105,7 +120,11 @@ public static class ProjectCardBuilder
             .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return new ConductorView(true, s.Now, s.RemoteMode, cards, unmatched);
+        var warnings = new List<string>(s.StaleSources ?? []);
+        if (s.Inbox is null) warnings.Add("inbox unavailable");
+        if (s.Notifications is null) warnings.Add("notifications unavailable");
+
+        return new ConductorView(true, s.Now, s.RemoteMode, cards, unmatched, warnings);
     }
 
     private static ProjectCard BuildCard(
@@ -119,9 +138,13 @@ public static class ProjectCardBuilder
         var inProgress = tasks.Where(t => t.Status == "in_progress").ToList();
         var toDo = tasks.Count(t => t.Status == "todo");
 
+        // Items reach "testing" as soon as they're coded, before review and while siblings are
+        // still being coded. Only count a task's testing items once the whole task has been
+        // handed over: every item is in testing or done.
         var awaitingTest = inProgress
-            .SelectMany(t => MtJson.ParseChecklist(t.ChecklistJson))
-            .Count(i => string.Equals(i.Status, "testing", StringComparison.OrdinalIgnoreCase));
+            .Select(t => MtJson.ParseChecklist(t.ChecklistJson))
+            .Where(items => items.Count > 0 && items.All(i => IsStatus(i, "testing") || IsStatus(i, "done") || i.Done))
+            .Sum(items => items.Count(i => IsStatus(i, "testing")));
 
         var activeAgents = inProgress
             .Where(t => string.Equals(t.SubStatus, "active", StringComparison.OrdinalIgnoreCase)
@@ -134,11 +157,11 @@ public static class ProjectCardBuilder
         var questionCount = questions.Count + escalations;
         var reasons = new List<string>();
         if (questions.Count > 0)
-            reasons.Add(Plural(questions.Count, "question or permission request", "questions or permission requests"));
+            reasons.Add(Plural(questions.Count, "recent question or permission request", "recent questions or permission requests"));
         if (escalations > 0)
             reasons.Add(Plural(escalations, "escalation", "escalations"));
         if (awaitingTest > 0)
-            reasons.Add(Plural(awaitingTest, "item waiting for you to test", "items waiting for you to test"));
+            reasons.Add(Plural(awaitingTest, "item ready for you to test", "items ready for you to test"));
 
         var (leftOff, leftOffAt) = LeftOff(p, s, inProgress);
 
@@ -189,13 +212,15 @@ public static class ProjectCardBuilder
     /// </summary>
     private static (string? Text, DateTime? At) LeftOff(MtProject p, ConductorSnapshot s, List<MtTask> inProgress)
     {
+        (string Text, DateTime? At)? fromTask = null;
         var task = inProgress.OrderByDescending(t => t.UpdatedAt ?? DateTime.MinValue).FirstOrDefault();
         if (task is not null)
         {
             var note = FirstLine(task.ContinuationNotes);
-            return (Truncate(note is null ? task.Title : $"{task.Title}: {note}"), task.UpdatedAt);
+            fromTask = (Truncate(note is null ? task.Title : $"{task.Title}: {note}"), task.UpdatedAt);
         }
 
+        (string Text, DateTime? At)? fromSession = null;
         if (s.LatestSessions.TryGetValue(p.Id, out var latest) && latest is not null)
         {
             var summary = CleanSessionSummary(FirstLine(latest.Summary ?? latest.Session?.Summary));
@@ -203,12 +228,22 @@ public static class ProjectCardBuilder
             {
                 var at = ParseTime(latest.Session?.EndedAt) ?? ParseTime(latest.Session?.StartedAt);
                 var who = latest.Session?.AgentName;
-                return (Truncate(who is null ? summary : $"{who}: {summary}"), at);
+                fromSession = (Truncate(who is null ? summary : $"{who}: {summary}"), at);
             }
         }
 
+        // Continuation notes are written to say where work stopped, so they win unless a
+        // session is clearly newer (more than an hour after the task was last touched).
+        if (fromTask is { } t && fromSession is { } se
+            && se.At is { } sessionAt && t.At is { } taskAt && sessionAt > taskAt + TimeSpan.FromHours(1))
+            return se;
+        if (fromTask is { } onlyTask) return onlyTask;
+        if (fromSession is { } onlySession) return onlySession;
         return (null, null);
     }
+
+    private static bool IsStatus(MtChecklistItem i, string status) =>
+        string.Equals(i.Status, status, StringComparison.OrdinalIgnoreCase);
 
     // Session summaries end with stats like " — 959 edits, 173 reads, 71 searches"; drop them.
     private static readonly System.Text.RegularExpressions.Regex SessionStats =
@@ -221,10 +256,11 @@ public static class ProjectCardBuilder
         return cleaned.Length == 0 ? null : cleaned;
     }
 
-    internal static bool IsQuestion(MtNotification n) =>
+    // MT folds permission prompts, questions and idle prompts into permission_request; it only
+    // records them while remote mode is on, so this signal is incomplete at the desk.
+    internal static bool IsQuestion(MtNotification n, DateTime now) =>
         string.Equals(n.NotificationType, "permission_request", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(n.NotificationType, "ask_owner", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(n.Title, "ask_user_question", StringComparison.OrdinalIgnoreCase);
+        && n.CreatedAt is { } at && now - at <= QuestionMaxAge;
 
     internal static MtProject? MatchProjectByPath(IEnumerable<MtProject> projects, string? cwd)
     {

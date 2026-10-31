@@ -30,6 +30,30 @@ public sealed class ConductorPoller
     private Dictionary<string, IReadOnlyList<PullRequestInfo>?> _prs = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, string?> _repoUrls = new(StringComparer.OrdinalIgnoreCase);
     private string? _gitHubLogin;
+
+    private IReadOnlyList<MtTask> _lastTasks = [];
+
+    /// <summary>
+    /// Joins the in_progress and todo lists. They're fetched in parallel, so a task that changes
+    /// status between the two requests can appear in both: keep one row per id (latest update).
+    /// MT sends task timestamps as UTC without an offset; convert them to local time here so
+    /// everything downstream compares local times.
+    /// </summary>
+    internal static IReadOnlyList<MtTask> MergeTasks(IEnumerable<MtTask> inProgress, IEnumerable<MtTask> todo) =>
+        inProgress.Concat(todo)
+            .Where(t => !string.IsNullOrEmpty(t.Id))
+            .Select(t => t with { UpdatedAt = UtcToLocal(t.UpdatedAt) })
+            .GroupBy(t => t.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(t => t.UpdatedAt ?? DateTime.MinValue).First())
+            .ToList();
+
+    internal static DateTime? UtcToLocal(DateTime? value) => value switch
+    {
+        null => null,
+        { Kind: DateTimeKind.Local } v => v,
+        { Kind: DateTimeKind.Utc } v => v.ToLocalTime(),
+        var v => DateTime.SpecifyKind(v.Value, DateTimeKind.Utc).ToLocalTime(),
+    };
     private Task? _prRefresh;
 
     public ConductorPoller(MtApiClient mt, GhPrClient gh, GitRemoteResolver git, Func<DateTime>? now = null)
@@ -67,13 +91,27 @@ public sealed class ConductorPoller
         var remoteTask = _mt.GetRemoteModeAsync(ct);
         await Task.WhenAll(projectsTask, inProgressTask, todoTask, inboxTask, notificationsTask, terminalsTask, remoteTask);
 
-        var projects = projectsTask.Result;
-        if (projects is null)
+        if (projectsTask.Result is null)
             return ProjectCardBuilder.Build(Offline(now)); // health answered but the API isn't usable
 
-        var tasks = new List<MtTask>();
-        tasks.AddRange(inProgressTask.Result ?? []);
-        tasks.AddRange(todoTask.Result ?? []);
+        // Every per-project dictionary below is keyed by id: drop rows without one, and duplicates.
+        IReadOnlyList<MtProject> projects = projectsTask.Result
+            .Where(p => !string.IsNullOrEmpty(p.Id))
+            .DistinctBy(p => p.Id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // A failed task fetch must not look like "no tasks": reuse the last good list instead.
+        var stale = new List<string>();
+        if (inProgressTask.Result is { } inProgress && todoTask.Result is { } todo)
+            _lastTasks = MergeTasks(inProgress, todo);
+        else
+            stale.Add("tasks unavailable (showing last known)");
+        var tasks = _lastTasks;
+
+        // Notification times come from SQLite datetime('now'): UTC without an offset.
+        var notifications = notificationsTask.Result?
+            .Select(n => n with { CreatedAt = UtcToLocal(n.CreatedAt) })
+            .ToList();
 
         if (now - _sessionsFetchedAt > SessionRefresh)
         {
@@ -105,13 +143,14 @@ public sealed class ConductorPoller
             withRepos,
             tasks,
             inboxTask.Result,
-            notificationsTask.Result,
+            notifications,
             terminalsTask.Result,
             new Dictionary<string, MtSessionLatest?>(_sessions, StringComparer.OrdinalIgnoreCase),
             prs,
             remoteTask.Result?.RemoteMode,
             now,
-            gitHubLogin);
+            gitHubLogin,
+            stale);
 
         return ProjectCardBuilder.Build(snapshot);
     }

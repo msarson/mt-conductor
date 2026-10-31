@@ -166,6 +166,60 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public void Merge_removes_duplicate_ids_keeping_the_latest_and_converts_utc()
+    {
+        var utc = new DateTime(2026, 7, 1, 12, 0, 0, DateTimeKind.Unspecified); // as MT sends it
+        MtTask T(string id, string status, DateTime? at) => new(id, id, status, null, null, "p", null, at, null, null, false);
+
+        var merged = ConductorPoller.MergeTasks(
+            [T("a", "in_progress", utc.AddMinutes(1))],
+            [T("a", "todo", utc), T("b", "todo", utc), T("", "todo", utc)]);
+
+        Assert.Equal(["a", "b"], merged.Select(t => t.Id));
+        Assert.Equal("in_progress", merged[0].Status);
+        Assert.Equal(DateTimeKind.Local, merged[1].UpdatedAt!.Value.Kind);
+        Assert.Equal(DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime(), merged[1].UpdatedAt);
+    }
+
+    [Fact]
+    public void Utc_to_local_handles_each_kind()
+    {
+        var local = new DateTime(2026, 7, 1, 12, 0, 0, DateTimeKind.Local);
+        Assert.Equal(local, ConductorPoller.UtcToLocal(local));
+        Assert.Null(ConductorPoller.UtcToLocal(null));
+        var utc = new DateTime(2026, 7, 1, 12, 0, 0, DateTimeKind.Utc);
+        Assert.Equal(utc.ToLocalTime(), ConductorPoller.UtcToLocal(utc));
+    }
+
+    [Fact]
+    public async Task Failed_task_fetch_reuses_last_good_tasks_and_warns()
+    {
+        var failTasks = false;
+        var (poller, _, _) = Create(pq => failTasks && pq.StartsWith("/api/tasks?", StringComparison.Ordinal)
+            ? (HttpStatusCode.InternalServerError, "")
+            : HealthyMt(pq));
+
+        await poller.RefreshAsync(CancellationToken.None);
+        failTasks = true;
+        var view = await poller.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(1, view.Cards.Single().InProgress);
+        Assert.Contains("tasks unavailable (showing last known)", view.Warnings!);
+    }
+
+    [Theory]
+    [InlineData(@"C:\work\proj", true)]
+    [InlineData("C:/work/proj", true)]
+    [InlineData(@"\\server\share\proj", false)]
+    [InlineData(@"\\?\C:\proj", false)]
+    [InlineData(@"\\.\pipe\x", false)]
+    [InlineData(@"relative\proj", false)]
+    public void Only_local_drive_paths_are_resolved(string path, bool expected)
+    {
+        Assert.Equal(expected, GitRemoteResolver.IsLocalPath(path));
+    }
+
+    [Fact]
     public async Task Session_lookups_are_throttled()
     {
         var (poller, mt, _) = Create(HealthyMt);

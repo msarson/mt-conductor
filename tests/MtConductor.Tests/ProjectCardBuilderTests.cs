@@ -62,9 +62,85 @@ public class ProjectCardBuilderTests
         Assert.Equal("Bob", card.Pm);
         Assert.Equal(2, card.InProgress);
         Assert.Equal(2, card.ToDo);
-        Assert.Equal(2, card.AwaitingTest);
+        // Task 1 still has an item in coding, so its testing item isn't handed over yet.
+        Assert.Equal(1, card.AwaitingTest);
         Assert.True(card.NeedsYou);
-        Assert.Contains("2 items waiting for you to test", card.NeedsYouReasons);
+        Assert.Contains("1 item ready for you to test", card.NeedsYouReasons);
+    }
+
+    [Fact]
+    public void Testing_items_count_only_when_the_whole_task_is_handed_over()
+    {
+        var view = ProjectCardBuilder.Build(Snapshot(
+            [Project("p", "P", @"C:\p")],
+            [
+                Task("partial", "p", "in_progress", """[{"item":"a","status":"testing"},{"item":"b","status":"pending"}]"""),
+                Task("handed", "p", "in_progress", """[{"item":"a","status":"testing"},{"item":"b","status":"done"},{"item":"c","status":"testing"}]"""),
+                Task("legacy", "p", "in_progress", """[{"item":"a","done":true},{"item":"b","status":"testing"}]"""),
+                Task("empty", "p", "in_progress", "[]"),
+            ]));
+        Assert.Equal(3, view.Cards.Single().AwaitingTest);
+    }
+
+    [Fact]
+    public void Duplicate_and_missing_task_ids_do_not_throw()
+    {
+        var view = ProjectCardBuilder.Build(Snapshot(
+            [Project("p", "P", @"C:\p")],
+            [Task("1", "p", "todo"), Task("1", "p", "in_progress"), Task("", "p", "todo")],
+            inbox: [new("m", "1", "T", "escalation", "help", Now, "Bob")]));
+        Assert.Equal(1, view.Cards.Single().Questions);
+    }
+
+    [Fact]
+    public void Escalations_for_archived_projects_count_as_unmatched()
+    {
+        var view = ProjectCardBuilder.Build(Snapshot(
+            [Project("live", "Live", @"C:\l"), Project("old", "Old", @"C:\o", status: "Archived")],
+            [Task("t", "old", "in_progress")],
+            inbox: [new("m", "t", "T", "escalation", "help", Now, "Bob")]));
+        Assert.Equal(1, view.UnmatchedQuestions);
+        Assert.Equal(0, view.Cards.Single().Questions);
+    }
+
+    [Fact]
+    public void Old_permission_requests_do_not_light_the_dot()
+    {
+        var view = ProjectCardBuilder.Build(Snapshot(
+            [Project("p", "P", @"C:\p")],
+            notifications:
+            [
+                new("old", "permission_request", "permission_request", "?", "Bob", @"C:\p", Now.AddDays(-2)),
+                new("undated", "permission_request", "permission_request", "?", "Bob", @"C:\p", null),
+            ]));
+        var card = view.Cards.Single();
+        Assert.Equal(0, card.Questions);
+        Assert.False(card.NeedsYou);
+    }
+
+    [Fact]
+    public void Missing_sources_become_warnings()
+    {
+        var view = ProjectCardBuilder.Build(Snapshot([Project("p", "P", @"C:\p")]) with
+        {
+            StaleSources = ["tasks unavailable (showing last known)"],
+        });
+        Assert.Equal(
+            ["tasks unavailable (showing last known)", "inbox unavailable", "notifications unavailable"],
+            view.Warnings!);
+    }
+
+    [Fact]
+    public void Left_off_uses_a_clearly_newer_session_over_stale_task_notes()
+    {
+        var view = ProjectCardBuilder.Build(Snapshot(
+            [Project("p", "P", @"C:\p")],
+            [Task("1", "p", "in_progress", updated: Now.AddDays(-10), notes: "ancient")],
+            sessions: new()
+            {
+                ["p"] = new MtSessionLatest(new MtSession("s", null, "Bob", null, null, "2026-10-31T13:00:00", null), "Fresh work"),
+            }));
+        Assert.Equal("Bob: Fresh work", view.Cards.Single().LeftOff);
     }
 
     [Fact]
