@@ -9,7 +9,8 @@ namespace MtConductor.Github;
 /// <summary>An open pull request as shown on a project card.</summary>
 /// <param name="ChecksState">"success" | "failure" | "pending" | "none".</param>
 /// <param name="ReviewDecision">APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, or null when gh reports none.</param>
-public sealed record PullRequestInfo(int Number, string Title, string Url, bool IsDraft, string ChecksState, string? ReviewDecision);
+/// <param name="Author">GitHub login of the PR author, when gh reports one.</param>
+public sealed record PullRequestInfo(int Number, string Title, string Url, bool IsDraft, string ChecksState, string? ReviewDecision, string? Author = null);
 
 /// <summary>
 /// Reads open pull requests by calling the GitHub CLI (<c>gh</c>). Results, including failures,
@@ -27,11 +28,18 @@ public sealed class GhPrClient
 
     /// <param name="cacheDuration">How long a result (or a failure) is reused per repo.</param>
     /// <param name="runGh">Runs gh for an owner/repo and returns its exit code and stdout. Tests pass a fake.</param>
-    public GhPrClient(TimeSpan cacheDuration, Func<string, CancellationToken, Task<(int ExitCode, string StdOut)>>? runGh = null)
+    /// <param name="runGhArgs">Runs gh with arbitrary args (used for the viewer login). Tests pass a fake.</param>
+    public GhPrClient(
+        TimeSpan cacheDuration,
+        Func<string, CancellationToken, Task<(int ExitCode, string StdOut)>>? runGh = null,
+        Func<string[], CancellationToken, Task<(int ExitCode, string StdOut)>>? runGhArgs = null)
     {
         _cacheDuration = cacheDuration;
         _runGh = runGh ?? RunGhAsync;
+        _runGhArgs = runGhArgs ?? RunGhArgsAsync;
     }
+
+    private readonly Func<string[], CancellationToken, Task<(int ExitCode, string StdOut)>> _runGhArgs;
 
     /// <summary>Returns open PRs for the repo, or null when unknown (gh missing, not logged in, timeout, bad repo URL).</summary>
     public async Task<IReadOnlyList<PullRequestInfo>?> GetOpenPrsAsync(string? gitRepoUrl, CancellationToken ct)
@@ -144,7 +152,9 @@ public sealed class GhPrClient
             if (string.IsNullOrEmpty(review))
                 review = null; // gh reports "" when there is no decision
 
-            list.Add(new PullRequestInfo(number, title, url, isDraft, checks, review));
+            var author = pr.TryGetProperty("author", out var a) && a.ValueKind == JsonValueKind.Object ? GetString(a, "login") : null;
+
+            list.Add(new PullRequestInfo(number, title, url, isDraft, checks, review, author));
         }
 
         return list;
@@ -201,8 +211,41 @@ public sealed class GhPrClient
     private static string? GetString(JsonElement obj, string name) =>
         obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
+    private string? _viewerLogin;
+    private DateTime _viewerFetchedUtc = DateTime.MinValue;
+
+    /// <summary>The logged-in gh user's login, or null when unknown. Cached like PR results.</summary>
+    public async Task<string?> GetViewerLoginAsync(CancellationToken ct)
+    {
+        if (DateTime.UtcNow - _viewerFetchedUtc < _cacheDuration) return _viewerLogin;
+        string? login = null;
+        try
+        {
+            var (exit, stdout) = await _runGhArgs(["api", "user", "--jq", ".login"], ct).ConfigureAwait(false);
+            var line = stdout.Trim();
+            if (exit == 0 && line.Length > 0 && !line.Contains(' ')) login = line;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or OperationCanceledException)
+        {
+        }
+        _viewerLogin = login;
+        _viewerFetchedUtc = DateTime.UtcNow;
+        return login;
+    }
+
+    private static Task<(int ExitCode, string StdOut)> RunGhAsync(string ownerRepo, CancellationToken ct) =>
+        RunGhArgsAsync(
+        [
+            "pr", "list", "--repo", ownerRepo, "--state", "open", "--limit", "30",
+            "--json", "number,title,url,isDraft,statusCheckRollup,reviewDecision,author",
+        ], ct);
+
     /// <summary>Default runner: launches gh directly (no shell). Returns (-1, "") on timeout.</summary>
-    private static async Task<(int ExitCode, string StdOut)> RunGhAsync(string ownerRepo, CancellationToken ct)
+    private static async Task<(int ExitCode, string StdOut)> RunGhArgsAsync(string[] args, CancellationToken ct)
     {
         var psi = new ProcessStartInfo("gh")
         {
@@ -213,14 +256,8 @@ public sealed class GhPrClient
             StandardOutputEncoding = System.Text.Encoding.UTF8,
             StandardErrorEncoding = System.Text.Encoding.UTF8,
         };
-        foreach (var arg in new[]
-                 {
-                     "pr", "list", "--repo", ownerRepo, "--state", "open", "--limit", "30",
-                     "--json", "number,title,url,isDraft,statusCheckRollup,reviewDecision",
-                 })
-        {
+        foreach (var arg in args)
             psi.ArgumentList.Add(arg);
-        }
         psi.Environment["GIT_CONFIG_COUNT"] = "0";
         psi.Environment["MULTITERMINAL_GH_SIGN"] = "0";
         psi.Environment["GH_PROMPT_DISABLED"] = "1";

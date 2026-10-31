@@ -2,14 +2,48 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
   <title>MT Conductor</title>
-  <style>
-    :root { color-scheme: light dark; font-family: "Segoe UI", sans-serif; }
-    body { margin: 16px; }
-  </style>
+  <link rel="stylesheet" href="conductor.css">
 </head>
 <body>
-  <h1>MT Conductor</h1>
-  <p id="status">Waiting for MultiTerminal…</p>
+  <header class="bar">
+    <h1>MT Conductor</h1>
+    <div class="bar-status">
+      <span id="remote" class="pill" hidden></span>
+      <span id="status" class="pill">Connecting to MultiTerminal…</span>
+    </div>
+  </header>
+
+  <div id="offline" class="banner" role="status" hidden>
+    MT offline. Retrying… Cards below show the last known state.
+  </div>
+
+  <main id="cards" class="cards" aria-live="polite"></main>
+
+  <p id="empty" class="empty" hidden>No projects yet.</p>
+  <p id="unmatched" class="footnote" hidden></p>
+
+  <template id="card-template">
+    <article class="card">
+      <header class="card-head">
+        <h2 class="card-title"><span class="name"></span> <span class="pm"></span></h2>
+        <span class="needs" hidden><span class="dot" aria-hidden="true">●</span> needs you</span>
+      </header>
+      <ul class="reasons" hidden></ul>
+      <p class="leftoff"></p>
+      <p class="tasks"></p>
+      <p class="prs-line"><span class="prs"></span><span class="questions"></span></p>
+      <div class="actions">
+        <button type="button" class="open">Open</button>
+        <button type="button" disabled title="Coming in phase 2 (uses MT's remote mode)">Carry on without me</button>
+        <button type="button" disabled title="Coming in phase 2">Pause</button>
+      </div>
+      <p class="open-hint" hidden></p>
+    </article>
+  </template>
+
+  <script src="conductor.js"></script>
 </body>
 </html>
