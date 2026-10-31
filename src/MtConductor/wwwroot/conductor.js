@@ -108,7 +108,17 @@
     const hint = el.querySelector(".open-hint");
     hint.textContent = card.openHint;
     hint.hidden = !openHints.has(card.id);
-    el.querySelector(".open").addEventListener("click", () => {
+    const openBtn = el.querySelector(".open");
+    if (card.activeAgents.length === 0) {
+      // Nothing we can point at yet: bringing a closed project up "where I left off" needs
+      // MT's Open endpoint (phase 3, upstream PR).
+      openBtn.disabled = true;
+      openBtn.title = "Opening a project that isn't running needs MT's Open endpoint (coming in phase 3).";
+      hint.hidden = true;
+      return el;
+    }
+    openBtn.title = "Shows which agent is working on this project";
+    openBtn.addEventListener("click", () => {
       if (openHints.has(card.id)) openHints.delete(card.id); else openHints.add(card.id);
       hint.hidden = !openHints.has(card.id);
     });
