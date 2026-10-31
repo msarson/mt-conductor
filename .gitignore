@@ -1,0 +1,38 @@
+# Build output
+bin/
+obj/
+*.dll
+*.pdb
+*.exe
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.cache
+*.rsuser
+
+# NuGet
+packages/
+*.nupkg
+*.snupkg
+
+# Test results
+TestResults/
+coverage.xml
+
+# User-specific
+*.userprefs
+launchSettings.json
+
+# Claude Code local settings and worktrees
+.claude/settings.local.json
+.claude/worktrees/
+
+# Node (for MCP server components)
+node_modules/
+npm-debug.log*
+
+# OS artifacts
+Thumbs.db
+.DS_Store

@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MtConductor/MtConductor.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MtConductor.Tests/MtConductor.Tests.csproj" />
+  </Folder>
+</Solution>

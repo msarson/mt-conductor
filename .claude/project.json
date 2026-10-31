@@ -1,0 +1,18 @@
+{
+  "id": "8eaa1885",
+  "name": "Multi Terminal Conductor",
+  "description": "MT Conductor: a small standalone Windows app (.NET 8 WinForms + WebView2) that gives one overview card per MultiTerminal project, open or not, using only MT's public REST API on localhost:5050.",
+  "changeLog": null,
+  "currentVersion": "0.1.0",
+  "createdAt": "2026-10-31T13:04:04.5872850+00:00",
+  "lastOpenedAt": "2026-10-31T13:05:22.2310459+00:00",
+  "isPinned": false,
+  "defaultTerminal": "claude-code",
+  "prompts": [
+  ],
+  "team": {
+    "agents": [
+      { "name": "Diana", "role": "fullstack" }
+    ]
+  }
+}
