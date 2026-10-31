@@ -1,0 +1,12 @@
+<Project>
+  <!--
+    Microsoft.Web.WebView2 always adds a reference to its WPF assembly, which targets a
+    newer WindowsBase than this WinForms-only app and raises MSB3277. We don't use WPF,
+    so drop that reference before references are resolved.
+  -->
+  <Target Name="DropWebView2WpfReference" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+</Project>
