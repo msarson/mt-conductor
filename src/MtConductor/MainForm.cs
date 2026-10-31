@@ -105,7 +105,8 @@ public sealed class MainForm : Form
                 System.Diagnostics.Trace.TraceError($"MT Conductor refresh failed: {ex}");
                 var warning = $"conductor error: {ex.GetType().Name} (see trace log)";
                 view = _lastView is { MtOnline: true } last
-                    ? last with { Warnings = [.. last.Warnings ?? [], warning] }
+                    // Replace any earlier conductor error so repeated failures don't pile up.
+                    ? last with { Warnings = [.. (last.Warnings ?? []).Where(w => !w.StartsWith("conductor error:", StringComparison.Ordinal)), warning] }
                     : new ConductorView(true, DateTime.Now, null, [], 0, [warning]);
             }
 
