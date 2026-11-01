@@ -7,8 +7,7 @@ namespace MtConductor.Api;
 /// <summary>
 /// Read-only client for MultiTerminal's local REST API. Every method returns null on any
 /// failure (MT offline, timeout, unexpected shape) instead of throwing, so the UI can show
-/// "MT offline" or "unknown" and keep polling. Everything is a GET except
-/// <see cref="SetRemoteModeAsync"/>, the one write MT Conductor makes (phase 2).
+/// "MT offline" or "unknown" and keep polling. It only issues GET requests.
 /// </summary>
 public sealed class MtApiClient
 {
@@ -66,25 +65,6 @@ public sealed class MtApiClient
 
     public Task<MtRemoteMode?> GetRemoteModeAsync(CancellationToken ct) =>
         GetAsync<MtRemoteMode>("api/remote-mode", ct);
-
-    /// <summary>
-    /// Turns MT's remote mode on or off (one switch for all projects). Returns the value MT
-    /// confirms, or null if MT refused or couldn't be reached. Sent without an Origin header,
-    /// which MT treats as a local, non-browser caller.
-    /// </summary>
-    public async Task<bool?> SetRemoteModeAsync(bool enabled, CancellationToken ct)
-    {
-        try
-        {
-            using var resp = await _http.PostAsJsonAsync("api/remote-mode", new { enabled }, MtJson.Options, ct);
-            if (!resp.IsSuccessStatusCode) return null;
-            return (await resp.Content.ReadFromJsonAsync<MtRemoteMode>(MtJson.Options, ct))?.RemoteMode;
-        }
-        catch (Exception ex) when (IsExpected(ex, ct))
-        {
-            return null;
-        }
-    }
 
     /// <summary>
     /// The owner's inbox user id, derived the way MT does it: first word of the owner

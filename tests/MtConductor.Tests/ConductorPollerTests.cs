@@ -232,67 +232,29 @@ public class ConductorPollerTests
         Assert.Equal(expected, GitRemoteResolver.IsLocalPath(path));
     }
 
-    // MT whose remote-mode flag can be flipped by the test (as MT's own hooks/idle timer would)
-    // and by POST /api/remote-mode (the FakeMt routes by path only, so a POST also lands here).
-    private static (ConductorPoller Poller, FakeMt Mt, Func<bool> Get, Action<bool> Set) WithRemoteMode(bool initial)
+    [Fact]
+    public async Task Remote_mode_flip_is_timestamped_but_first_sighting_is_not()
     {
-        var remote = initial;
-        var (poller, mt, _) = Create(pq => pq == "/api/remote-mode"
+        var remote = true;
+        var clock = Now;
+        var mt = new FakeMt(pq => pq == "/api/remote-mode"
             ? (HttpStatusCode.OK, $$"""{"remote_mode":{{(remote ? "true" : "false")}}}""")
             : HealthyMt(pq));
-        return (poller, mt, () => remote, v => remote = v);
-    }
+        var poller = new ConductorPoller(
+            new MtApiClient(new HttpClient(mt) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) }),
+            new GhPrClient(TimeSpan.FromMinutes(2), (_, _) => Task.FromResult((1, "")), (_, _) => Task.FromResult((1, ""))),
+            new GitRemoteResolver(TimeSpan.FromMinutes(10), (_, _) => Task.FromResult((128, ""))),
+            () => clock);
 
-    [Fact]
-    public async Task Toggle_from_conductor_posts_and_is_recorded_as_ours()
-    {
-        var (poller, mt, _, setRemote) = WithRemoteMode(false);
-        await poller.RefreshAsync(CancellationToken.None);
+        Assert.Null((await poller.RefreshAsync(CancellationToken.None)).RemoteModeChangedAt);
 
-        setRemote(true);   // what MT does when it accepts the POST
-        var confirmed = await poller.SetRemoteModeAsync(true, CancellationToken.None);
-        var view = await poller.RefreshAsync(CancellationToken.None);
-
-        Assert.True(confirmed);
-        Assert.Contains(mt.Requests, r => r.Method == HttpMethod.Post && r.RequestUri!.AbsolutePath == "/api/remote-mode");
-        Assert.True(view.RemoteMode);
-        Assert.Equal(new RemoteChange(true, ByConductor: true, Now), view.LastRemoteChange);
-    }
-
-    [Fact]
-    public async Task Change_made_by_MT_is_attributed_to_MT()
-    {
-        var (poller, _, _, setRemote) = WithRemoteMode(true);
-        var first = await poller.RefreshAsync(CancellationToken.None);
-        Assert.Null(first.LastRemoteChange);   // first sighting is not a change
-
-        setRemote(false);   // Owner typed in a pane
+        remote = false;              // e.g. the Owner typed in an MT pane
+        clock = Now.AddMinutes(3);
         var view = await poller.RefreshAsync(CancellationToken.None);
 
         Assert.False(view.RemoteMode);
-        Assert.Equal(new RemoteChange(false, ByConductor: false, Now), view.LastRemoteChange);
-    }
-
-    [Fact]
-    public async Task Only_write_requests_are_the_remote_mode_toggle()
-    {
-        var (poller, mt, _, _) = WithRemoteMode(false);
-        await poller.RefreshAsync(CancellationToken.None);
-        await poller.SetRemoteModeAsync(true, CancellationToken.None);
-        await poller.RefreshAsync(CancellationToken.None);
-
-        Assert.All(mt.Requests.Where(r => r.Method != HttpMethod.Get),
-            r => Assert.Equal("/api/remote-mode", r.RequestUri!.AbsolutePath));
-    }
-
-    [Fact]
-    public async Task Refused_toggle_returns_null_and_records_no_change()
-    {
-        var (poller, _, _) = Create(pq => pq == "/api/remote-mode" ? (HttpStatusCode.Forbidden, "") : HealthyMt(pq));
-
-        Assert.Null(await poller.SetRemoteModeAsync(true, CancellationToken.None));
-        var view = await poller.RefreshAsync(CancellationToken.None);
-        Assert.Null(view.LastRemoteChange);
+        Assert.Equal(Now.AddMinutes(3), view.RemoteModeChangedAt);
+        Assert.All(mt.Requests, r => Assert.Equal(HttpMethod.Get, r.Method));   // still read-only
     }
 
     [Fact]

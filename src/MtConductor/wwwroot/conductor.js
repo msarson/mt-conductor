@@ -8,7 +8,6 @@
   const template = document.getElementById("card-template");
   const statusEl = document.getElementById("status");
   const remoteEl = document.getElementById("remote");
-  const carryEl = document.getElementById("carry");
   const offlineEl = document.getElementById("offline");
   const emptyEl = document.getElementById("empty");
   const unmatchedEl = document.getElementById("unmatched");
@@ -127,48 +126,6 @@
     return el;
   }
 
-  // "Carry on without me" = MT's remote mode, which is one switch for all projects. The button
-  // always shows MT's polled value; MT also flips it on its own (desk activity, idle timer, phone).
-  let remoteOn = null;
-  carryEl.addEventListener("click", () => {
-    if (remoteOn === null || !host) return;
-    carryEl.disabled = true;
-    carryEl.textContent = "Switching…";
-    host.postMessage({ type: "setRemoteMode", enabled: !remoteOn });
-  });
-
-  function remoteChangeText(change) {
-    if (!change) return "";
-    const at = new Date(change.at);
-    const when = isNaN(at) ? "" : ` at ${at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-    if (change.byConductor) return `turned ${change.on ? "on" : "off"} here${when}`;
-    return change.on
-      ? `MT turned it on${when} (idle, or from the phone)`
-      : `MT turned it off${when} (you used MT at the desk, or the phone)`;
-  }
-
-  function renderRemote(view) {
-    const known = view.mtOnline && view.remoteMode !== null && view.remoteMode !== undefined;
-    remoteOn = known ? view.remoteMode : null;
-    carryEl.hidden = !known;
-    remoteEl.hidden = !known;
-    if (!known) return;
-
-    carryEl.disabled = false;
-    carryEl.setAttribute("aria-pressed", String(remoteOn));
-    carryEl.textContent = remoteOn ? "I'm back" : "Carry on without me";
-    carryEl.title = remoteOn
-      ? "Turn MT's remote mode off: agents' questions come back to your panes."
-      : "Turn MT's remote mode on for ALL projects: agents keep working and send their questions "
-        + "to the MT phone app. MT turns it off again when you type in a pane.";
-
-    const change = remoteChangeText(view.lastRemoteChange);
-    remoteEl.className = `pill${remoteOn ? " remote-on" : ""}`;
-    remoteEl.textContent = `Remote mode: ${remoteOn ? "on" : "off"}${change ? ` · ${change}` : ""}`;
-    remoteEl.title = "MT's remote mode is one switch for all projects. When it's on, agents' questions "
-      + "go to your phone instead of waiting in their panes.";
-  }
-
   function render(view) {
     offlineEl.hidden = view.mtOnline;
     cardsEl.classList.toggle("stale", !view.mtOnline);
@@ -180,7 +137,19 @@
       statusEl.textContent += ` · ${warnings.join(", ")}`;
     }
 
-    renderRemote(view);
+    if (view.remoteMode === null || view.remoteMode === undefined) {
+      remoteEl.hidden = true;
+    } else {
+      remoteEl.hidden = false;
+      const changed = view.remoteModeChangedAt ? new Date(view.remoteModeChangedAt) : null;
+      const since = changed && !isNaN(changed)
+        ? ` · since ${changed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+        : "";
+      remoteEl.textContent = `Remote mode: ${view.remoteMode ? "on" : "off"}${since}`;
+      remoteEl.title = "MT's remote mode is one switch for all projects. When it's on, agents' questions go "
+        + "to your phone for a few minutes before falling back to their panes. MT turns it on and off itself "
+        + "(idle, desk activity, phone).";
+    }
 
     // Offline: keep the last cards on screen, dimmed.
     if (!view.mtOnline) return;

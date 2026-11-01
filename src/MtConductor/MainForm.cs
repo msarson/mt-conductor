@@ -30,11 +30,6 @@ public sealed class MainForm : Form
     private ConductorView? _lastView;
     private bool _pageReady;
 
-    // UI-thread only: the poll loop and web messages both run on the WinForms context.
-    private CancellationTokenSource? _wakePoll;
-    private bool _remoteBusy;
-    private bool _remoteError;
-
     public MainForm()
     {
         Text = "MT Conductor";
@@ -115,13 +110,6 @@ public sealed class MainForm : Form
                     : new ConductorView(true, DateTime.Now, null, [], 0, [warning]);
             }
 
-            if (_remoteError)
-            {
-                _remoteError = false;
-                if (view.MtOnline)
-                    view = view with { Warnings = [.. view.Warnings ?? [], "MT didn't accept the remote-mode change"] };
-            }
-
             _lastView = view;
             Publish(view);
 
@@ -130,55 +118,15 @@ public sealed class MainForm : Form
                 ? OnlineInterval
                 : OfflineBackoff[Math.Min(offlineStreak - 1, OfflineBackoff.Length - 1)];
 
-            using var wake = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            _wakePoll = wake;
             try
             {
-                await Task.Delay(delay, wake.Token);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                // Woken early (e.g. after the remote-mode toggle): refresh now.
+                await Task.Delay(delay, ct);
             }
             catch (OperationCanceledException)
             {
                 return;
             }
-            finally
-            {
-                _wakePoll = null;
-            }
         }
-    }
-
-    /// <summary>
-    /// "Carry on without me": asks MT to switch remote mode, then refreshes at once so the page
-    /// shows MT's real value rather than the one we asked for. Repeat clicks while a request is
-    /// in flight are ignored.
-    /// </summary>
-    private async Task SetRemoteModeAsync(bool enabled)
-    {
-        if (_remoteBusy) return;
-        _remoteBusy = true;
-        try
-        {
-            var confirmed = await _poller.SetRemoteModeAsync(enabled, _closing.Token);
-            if (confirmed != enabled) _remoteError = true;
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Trace.TraceError($"MT Conductor remote-mode change failed: {ex}");
-            _remoteError = true;
-        }
-        finally
-        {
-            _remoteBusy = false;
-        }
-        _wakePoll?.Cancel();
     }
 
     private void Publish(ConductorView view)
@@ -198,7 +146,6 @@ public sealed class MainForm : Form
 
         string? type;
         string? url = null;
-        bool? enabled = null;
         try
         {
             using var doc = JsonDocument.Parse(e.WebMessageAsJson);
@@ -206,8 +153,6 @@ public sealed class MainForm : Form
             if (root.ValueKind != JsonValueKind.Object) return;
             type = root.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
             if (root.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String) url = u.GetString();
-            if (root.TryGetProperty("enabled", out var en) && en.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                enabled = en.GetBoolean();
         }
         catch (JsonException)
         {
@@ -222,9 +167,6 @@ public sealed class MainForm : Form
                 break;
             case "openUrl":
                 OpenExternal(url);
-                break;
-            case "setRemoteMode" when enabled is { } on:
-                _ = SetRemoteModeAsync(on);
                 break;
         }
     }

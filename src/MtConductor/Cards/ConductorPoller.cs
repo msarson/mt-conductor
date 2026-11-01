@@ -34,42 +34,16 @@ public sealed class ConductorPoller
     private IReadOnlyList<MtTask> _lastTasks = [];
     private bool _haveTasks;
 
-    // Remote mode as last seen, and the last flip. _remoteSetVersion changes on every toggle
-    // from here, so a refresh that read the value before the toggle doesn't report the old value
-    // as a change MT made. Only touched on the caller's thread (the UI thread in the app).
+    // Remote mode as last seen and when it last flipped. MT flips it itself (desk activity,
+    // idle timer, phone, presence sensor, its own switch); the API doesn't say which.
     private bool? _lastRemote;
-    private RemoteChange? _lastRemoteChange;
-    private int _remoteSetVersion;
+    private DateTime? _remoteChangedAt;
 
-    /// <summary>
-    /// The "Carry on without me" switch: turns MT's remote mode on or off for all projects.
-    /// Returns MT's confirmed value, or null if MT didn't accept it.
-    /// </summary>
-    public async Task<bool?> SetRemoteModeAsync(bool enabled, CancellationToken ct)
+    private void TrackRemote(bool? polled, DateTime now)
     {
-        _remoteSetVersion++;
-        var confirmed = await _mt.SetRemoteModeAsync(enabled, ct);
-        _remoteSetVersion++;
-        if (confirmed is { } on)
-        {
-            if (_lastRemote != on) _lastRemoteChange = new RemoteChange(on, ByConductor: true, _now());
-            _lastRemote = on;
-        }
-        return confirmed;
-    }
-
-    /// <summary>
-    /// Reconciles a freshly polled remote-mode value with what we last saw. Returns the value
-    /// to show: the polled one, or our own confirmed value if a toggle happened mid-refresh.
-    /// </summary>
-    private bool? TrackRemote(bool? polled, int versionAtStart, DateTime now)
-    {
-        if (versionAtStart != _remoteSetVersion) return _lastRemote ?? polled;   // stale read
-        if (polled is not { } on) return null;
-        if (_lastRemote is { } before && before != on)
-            _lastRemoteChange = new RemoteChange(on, ByConductor: false, now);
+        if (polled is not { } on) return;   // unknown this tick: keep what we had
+        if (_lastRemote is { } before && before != on) _remoteChangedAt = now;
         _lastRemote = on;
-        return on;
     }
 
     /// <summary>
@@ -106,7 +80,6 @@ public sealed class ConductorPoller
     public async Task<ConductorView> RefreshAsync(CancellationToken ct)
     {
         var now = _now();
-        var remoteVersion = _remoteSetVersion;
 
         var health = await _mt.GetHealthAsync(ct);
         if (health is null)
@@ -192,12 +165,13 @@ public sealed class ConductorPoller
             terminalsTask.Result,
             new Dictionary<string, MtSessionLatest?>(_sessions, StringComparer.OrdinalIgnoreCase),
             prs,
-            TrackRemote(remoteTask.Result?.RemoteMode, remoteVersion, now),
+            remoteTask.Result?.RemoteMode,
             now,
             gitHubLogin,
             stale);
 
-        return ProjectCardBuilder.Build(snapshot) with { LastRemoteChange = _lastRemoteChange };
+        TrackRemote(remoteTask.Result?.RemoteMode, now);
+        return ProjectCardBuilder.Build(snapshot) with { RemoteModeChangedAt = _remoteChangedAt };
     }
 
     /// <summary>Waits for an in-flight PR refresh (tests and shutdown).</summary>
