@@ -143,7 +143,10 @@
   const OPEN_UNSUPPORTED = "Opening from here needs a newer MT (ClarionLive/multiterminal#103).";
   const LAUNCH_WATCH_MS = 90_000;   // how long to watch for a new agent after a launch
   const PENDING_MS = 15_000;        // the host always answers; this is only a backstop
-  const NOTE_MS = 10_000;
+  // MT takes the foreground when Open works, so the Owner reads the card's note only after
+  // switching back: keep notes up for a minute (a new click replaces them at once).
+  const NOTE_MS = 60_000;
+  const NOANSWER_COOLDOWN_MS = 30_000;
   let openSupported = null;         // from the host's view; null = not tried yet
   // projectId -> { text, pendingSince?, launchingSince?, agentsBefore?, until?, busyUntil? }
   const openState = new Map();
@@ -234,7 +237,7 @@
         break;
       case "noanswer":
         // The open may still happen once MT's dialog closes: don't invite a second launch at once.
-        st = { ...note("MT didn't answer in time. It may be showing a dialog; the open can still happen.", NOTE_MS * 3), busyUntil: now + NOTE_MS * 3 };
+        st = { ...note("MT didn't answer in time. It may be showing a dialog; the open can still happen.", NOTE_MS * 2), busyUntil: now + NOANSWER_COOLDOWN_MS };
         break;
       default:
         st = note(`MT couldn't open it. ${msg.detail || ""}`.trim(), NOTE_MS * 2);
