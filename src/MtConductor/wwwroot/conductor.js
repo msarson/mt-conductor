@@ -19,6 +19,7 @@
   let lastView = null;      // last online view (what the cards show)
   let currentView = null;   // last view of any kind
 
+  const LAST_GOOD_WARNING = "showing last good view";   // pinned by ProjectCardBuilder.RefreshFailed
   const CHECK_GLYPH = { success: "✓", failure: "✗", pending: "…", none: "" };
 
   function plural(n, one, many) {
@@ -288,7 +289,10 @@
   function render(view) {
     currentView = view;
     offlineEl.hidden = view.mtOnline;
-    cardsEl.classList.toggle("stale", !view.mtOnline);
+    // Dim the cards when MT is offline, and also when this is a kept view after a failed refresh
+    // (no offline banner then: MT itself is fine).
+    const keptAfterError = !!(view.warnings && view.warnings.includes(LAST_GOOD_WARNING));
+    cardsEl.classList.toggle("stale", !view.mtOnline || keptAfterError);
     statusEl.className = `pill ${view.mtOnline ? "online" : "offline"}`;
     const warnings = view.warnings || [];   // also while offline: a conductor error is ours, not MT's
     statusEl.textContent = view.mtOnline ? `MT online · updated ${timeText(view.updatedAt)}` : "MT offline";
