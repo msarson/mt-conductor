@@ -11,6 +11,7 @@
   const offlineEl = document.getElementById("offline");
   const emptyEl = document.getElementById("empty");
   const unmatchedEl = document.getElementById("unmatched");
+  const laterNoteEl = document.getElementById("later-note");
 
   // Which cards have their Open hint expanded, by project id, so refreshes don't collapse them.
   const openHints = new Set();
@@ -314,6 +315,7 @@
     cardsEl.replaceChildren(...view.cards.map(renderCard));
     hasCards = view.cards.length > 0;
     emptyEl.hidden = hasCards;
+    laterNoteEl.hidden = !hasCards;   // explains the two greyed-out buttons once, not on every card
 
     unmatchedEl.hidden = view.unmatchedQuestions === 0;
     unmatchedEl.textContent = view.unmatchedQuestions === 0 ? ""
