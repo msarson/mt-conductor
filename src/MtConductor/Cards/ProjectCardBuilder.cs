@@ -40,7 +40,12 @@ public sealed record ProjectCard(
     bool HasGitHubRepo,
     IReadOnlyList<string> ActiveAgents,     // connected agents whose active task is in this project
     string OpenHint,
-    bool PrOwnerKnown = true);              // false: gh's login is unknown, so PRs aren't split into yours and others'
+    bool PrOwnerKnown = true,               // false: gh's login is unknown, so PRs aren't split into yours and others'
+    // What's behind the numbers, for hover text: task titles (at most TitleListMax, then "+N more").
+    IReadOnlyList<string>? InProgressTitles = null,
+    IReadOnlyList<string>? ToDoTitles = null,
+    IReadOnlyList<string>? AwaitingTestTitles = null,    // "Title (3 items)" for each task with items ready to test
+    IReadOnlyList<string>? ReasonDetails = null);        // parallel to NeedsYouReasons: hover text, "" when there is none
 
 public sealed record ConductorView(
     bool MtOnline,
@@ -59,6 +64,7 @@ public sealed record ConductorView(
 public static class ProjectCardBuilder
 {
     private const int LeftOffMaxLength = 160;
+    internal const int TitleListMax = 10;
 
     /// <summary>
     /// Unread permission requests / questions older than this are ignored. MT only marks them
@@ -165,15 +171,19 @@ public static class ProjectCardBuilder
     {
         var tasks = s.Tasks.Where(t => string.Equals(t.ProjectId, p.Id, StringComparison.OrdinalIgnoreCase) && !t.IsQuickTask).ToList();
         var inProgress = tasks.Where(t => t.Status == "in_progress").ToList();
-        var toDo = tasks.Count(t => t.Status == "todo");
+        var toDoTasks = tasks.Where(t => t.Status == "todo").ToList();
 
         // Items reach "testing" as soon as they're coded, before review and while siblings are
         // still being coded. Only count a task's testing items once the whole task has been
         // handed over: every item is in testing or done.
-        var awaitingTest = inProgress
-            .Select(t => MtJson.ParseChecklist(t.ChecklistJson))
-            .Where(items => items.Count > 0 && items.All(i => IsStatus(i, "testing") || IsStatus(i, "done") || i.Done))
-            .Sum(items => items.Count(i => IsStatus(i, "testing")));
+        var awaiting = inProgress
+            .Select(t => (Task: t, Items: MtJson.ParseChecklist(t.ChecklistJson)))
+            .Where(x => x.Items.Count > 0 && x.Items.All(i => IsStatus(i, "testing") || IsStatus(i, "done") || i.Done))
+            .Select(x => (x.Task.Title, Testing: x.Items.Count(i => IsStatus(i, "testing"))))
+            .Where(x => x.Testing > 0)
+            .ToList();
+        var awaitingTest = awaiting.Sum(x => x.Testing);
+        var awaitingTitles = CapTitles(awaiting.Select(x => x.Testing == 1 ? x.Title : $"{x.Title} ({x.Testing} items)"));
 
         var activeAgents = inProgress
             .Where(t => string.Equals(t.SubStatus, "active", StringComparison.OrdinalIgnoreCase)
@@ -185,12 +195,22 @@ public static class ProjectCardBuilder
 
         var questionCount = questions.Count + escalations;
         var reasons = new List<string>();
+        var reasonDetails = new List<string>();
         if (questions.Count > 0)
+        {
             reasons.Add(Plural(questions.Count, "recent question or permission request", "recent questions or permission requests"));
+            reasonDetails.Add("");
+        }
         if (escalations > 0)
+        {
             reasons.Add(Plural(escalations, "escalation", "escalations"));
+            reasonDetails.Add("");
+        }
         if (awaitingTest > 0)
+        {
             reasons.Add(Plural(awaitingTest, "item ready for you to test", "items ready for you to test"));
+            reasonDetails.Add(string.Join("\n", awaitingTitles));
+        }
 
         var (leftOff, leftOffAt) = LeftOff(p, s, inProgress);
 
@@ -225,7 +245,7 @@ public static class ProjectCardBuilder
             leftOff,
             leftOffAt is null ? null : RelativeAge(leftOffAt.Value, s.Now),
             inProgress.Count,
-            toDo,
+            toDoTasks.Count,
             awaitingTest,
             questionCount,
             prs,
@@ -233,7 +253,11 @@ public static class ProjectCardBuilder
             HasGitHubRepo: !string.IsNullOrWhiteSpace(p.GitRepoUrl),
             activeAgents,
             openHint,
-            PrOwnerKnown: s.GitHubLogin is not null);
+            PrOwnerKnown: s.GitHubLogin is not null,
+            InProgressTitles: CapTitles(inProgress.Select(t => t.Title)),
+            ToDoTitles: CapTitles(toDoTasks.Select(t => t.Title)),
+            AwaitingTestTitles: awaitingTitles,
+            ReasonDetails: reasonDetails);
     }
 
     /// <summary>
@@ -271,6 +295,16 @@ public static class ProjectCardBuilder
         if (fromTask is { } onlyTask) return onlyTask;
         if (fromSession is { } onlySession) return onlySession;
         return (null, null);
+    }
+
+    /// <summary>The first <see cref="TitleListMax"/> titles, then "+N more".</summary>
+    internal static IReadOnlyList<string> CapTitles(IEnumerable<string> titles)
+    {
+        var all = titles.Select(t => string.IsNullOrWhiteSpace(t) ? "(untitled)" : t.Trim()).ToList();
+        if (all.Count <= TitleListMax) return all;
+        var capped = all.Take(TitleListMax).ToList();
+        capped.Add($"+{all.Count - TitleListMax} more");
+        return capped;
     }
 
     private static bool IsStatus(MtChecklistItem i, string status) =>

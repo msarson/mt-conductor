@@ -109,6 +109,8 @@ body {
 .tasks, .prs-line { color: var(--muted); }
 .prs-line { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 
+.tip { text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; }
+
 .prs a { color: var(--accent); text-decoration: none; margin-right: 8px; }
 .prs a:hover { text-decoration: underline; }
 .check-success { color: var(--ok); }

@@ -404,4 +404,40 @@ public class ProjectCardBuilderTests
         Assert.False(after.MtOnline);
         Assert.Equal(["conductor error: IOException (see trace log)"], after.Warnings);
     }
+
+    [Fact]
+    public void Counts_come_with_the_titles_behind_them()
+    {
+        var card = ProjectCardBuilder.Build(Snapshot(
+            [Project("p", "P", @"C:\p")],
+            [
+                Task("1", "p", "in_progress", """[{"item":"x","status":"testing"},{"item":"y","status":"testing"}]"""),
+                Task("2", "p", "in_progress", """[{"item":"z","status":"testing"}]"""),
+                Task("3", "p", "in_progress", """[{"item":"a","status":"testing"},{"item":"b","status":"coding"}]"""),   // not handed over yet
+                Task("4", "p", "todo"),
+                Task("5", "p", "todo"),
+            ])).Cards.Single();
+
+        Assert.Equal(["Task 1", "Task 2", "Task 3"], card.InProgressTitles);
+        Assert.Equal(["Task 4", "Task 5"], card.ToDoTitles);
+        Assert.Equal(3, card.AwaitingTest);
+        Assert.Equal(["Task 1 (2 items)", "Task 2"], card.AwaitingTestTitles);
+        // The needs-you reason for items to test carries the same list as its hover text.
+        Assert.Equal(card.NeedsYouReasons.Count, card.ReasonDetails!.Count);
+        Assert.Equal("Task 1 (2 items)\nTask 2", card.ReasonDetails[^1]);
+    }
+
+    [Fact]
+    public void Title_lists_are_capped_with_a_plus_more_line()
+    {
+        var tasks = Enumerable.Range(1, 13).Select(i => Task(i.ToString(), "p", "todo")).ToList();
+
+        var card = ProjectCardBuilder.Build(Snapshot([Project("p", "P", @"C:\p")], tasks)).Cards.Single();
+
+        Assert.Equal(13, card.ToDo);
+        Assert.Equal(ProjectCardBuilder.TitleListMax + 1, card.ToDoTitles!.Count);
+        Assert.Equal("+3 more", card.ToDoTitles[^1]);
+        Assert.Equal(["a"], ProjectCardBuilder.CapTitles(["a"]));
+        Assert.Equal(["(untitled)"], ProjectCardBuilder.CapTitles([" "]));
+    }
 }

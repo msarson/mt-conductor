@@ -32,6 +32,13 @@
       : { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
+  // Gives an element a hover list (one line per entry) and marks it as having one.
+  function withTip(el, lines) {
+    if (lines.length === 0) return;
+    el.title = lines.join("\n");
+    el.classList.add("tip");
+  }
+
   function renderPrs(container, card) {
     container.replaceChildren();
     container.title = "";
@@ -85,11 +92,12 @@
     el.querySelector(".needs").hidden = !card.needsYou;
     const reasons = el.querySelector(".reasons");
     reasons.hidden = card.needsYouReasons.length === 0;
-    for (const r of card.needsYouReasons) {
+    card.needsYouReasons.forEach((r, i) => {
       const li = document.createElement("li");
       li.textContent = r;
+      withTip(li, card.reasonDetails && card.reasonDetails[i] ? [card.reasonDetails[i]] : []);
       reasons.append(li);
-    }
+    });
 
     const leftoff = el.querySelector(".leftoff");
     if (card.leftOff) {
@@ -102,8 +110,21 @@
       leftoff.classList.add("age");
     }
 
-    el.querySelector(".tasks").textContent =
-      `Tasks: ${card.inProgress} in progress · ${card.toDo} to do · ${card.awaitingTest} ready for me to test`;
+    // Each count explains itself on hover: the titles of the tasks behind it.
+    const tasks = el.querySelector(".tasks");
+    const counts = [
+      [`${card.inProgress} in progress`, card.inProgressTitles],
+      [`${card.toDo} to do`, card.toDoTitles],
+      [`${card.awaitingTest} ready for me to test`, card.awaitingTestTitles],
+    ];
+    tasks.append("Tasks: ");
+    counts.forEach(([text, titles], i) => {
+      if (i > 0) tasks.append(" · ");
+      const span = document.createElement("span");
+      span.textContent = text;
+      withTip(span, titles || []);
+      tasks.append(span);
+    });
 
     renderPrs(el.querySelector(".prs"), card);
     const questions = el.querySelector(".questions");
