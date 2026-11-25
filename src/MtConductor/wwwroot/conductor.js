@@ -15,7 +15,8 @@
   // Which cards have their Open hint expanded, by project id, so refreshes don't collapse them.
   const openHints = new Set();
   let hasCards = false;
-  let lastView = null;
+  let lastView = null;      // last online view (what the cards show)
+  let currentView = null;   // last view of any kind
 
   const CHECK_GLYPH = { success: "✓", failure: "✗", pending: "…", none: "" };
 
@@ -239,10 +240,12 @@
         st = note(`MT couldn't open it. ${msg.detail || ""}`.trim(), NOTE_MS * 2);
     }
     openState.set(msg.projectId, st);
-    if (lastView) render(lastView);
+    // While MT is offline the dimmed cards stay as they are; the note shows when it's back.
+    if (lastView && currentView === lastView) render(lastView);
   }
 
   function render(view) {
+    currentView = view;
     offlineEl.hidden = view.mtOnline;
     cardsEl.classList.toggle("stale", !view.mtOnline);
     statusEl.className = `pill ${view.mtOnline ? "online" : "offline"}`;
