@@ -6,17 +6,6 @@ namespace MtConductor.Tests;
 
 public class MtApiClientTests
 {
-    private sealed class FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
-    {
-        public List<HttpRequestMessage> Requests { get; } = [];
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
-        {
-            Requests.Add(request);
-            return Task.FromResult(respond(request));
-        }
-    }
-
     private static (MtApiClient Client, FakeHandler Handler) ClientReturning(HttpStatusCode code, string body)
     {
         var handler = new FakeHandler(_ => new HttpResponseMessage(code)

@@ -262,7 +262,7 @@ public sealed class ConductorPoller
                     // MT's gitRepoUrl first; otherwise the project folder's own origin remote.
                     var repoUrl = !string.IsNullOrWhiteSpace(p.GitRepoUrl)
                         ? p.GitRepoUrl
-                        : await _git.GetOriginUrlAsync(p.SourcePath ?? p.Path, ct);
+                        : await _git.GetRepoUrlAsync(p.SourcePath ?? p.Path, ct);
                     var prs = repoUrl is null ? null : await _gh.GetOpenPrsAsync(repoUrl, ct);
                     return (p.Id, RepoUrl: repoUrl, Prs: prs);
                 }));

@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -245,48 +244,6 @@ public sealed class GhPrClient
         ], ct);
 
     /// <summary>Default runner: launches gh directly (no shell). Returns (-1, "") on timeout.</summary>
-    private static async Task<(int ExitCode, string StdOut)> RunGhArgsAsync(string[] args, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo("gh")
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = System.Text.Encoding.UTF8,
-            StandardErrorEncoding = System.Text.Encoding.UTF8,
-        };
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
-        psi.Environment["GIT_CONFIG_COUNT"] = "0";
-        psi.Environment["MULTITERMINAL_GH_SIGN"] = "0";
-        psi.Environment["GH_PROMPT_DISABLED"] = "1";
-        psi.Environment["NO_COLOR"] = "1";
-
-        using var process = new Process { StartInfo = psi };
-        process.Start(); // throws Win32Exception when gh isn't installed; the caller maps that to null
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(GhTimeout);
-
-        // Drain both streams concurrently so a chatty stderr can't block the child.
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-        var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
-
-        try
-        {
-            await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
-            var stdout = await stdoutTask.ConfigureAwait(false);
-            await stderrTask.ConfigureAwait(false);
-            return (process.ExitCode, stdout);
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-            catch (Win32Exception) { }
-            ct.ThrowIfCancellationRequested();
-            return (-1, ""); // timed out
-        }
-    }
+    private static Task<(int ExitCode, string StdOut)> RunGhArgsAsync(string[] args, CancellationToken ct) =>
+        ProcessRunner.RunAsync("gh", args, GhTimeout, ct);
 }

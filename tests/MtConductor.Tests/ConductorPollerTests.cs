@@ -10,21 +10,15 @@ public class ConductorPollerTests
 {
     private static readonly DateTime Now = new(2026, 10, 31, 14, 0, 0, DateTimeKind.Local);
 
-    private sealed class FakeMt(Func<string, (HttpStatusCode, string)?> route) : HttpMessageHandler
+    private sealed class FakeMt(Func<string, (HttpStatusCode, string)?> route) : FakeHandler(request =>
     {
-        public List<HttpRequestMessage> Requests { get; } = [];
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        var r = route(request.RequestUri!.PathAndQuery);
+        if (r is null) throw new HttpRequestException("connection refused");
+        return new HttpResponseMessage(r.Value.Item1)
         {
-            Requests.Add(request);
-            var r = route(request.RequestUri!.PathAndQuery);
-            if (r is null) throw new HttpRequestException("connection refused");
-            return Task.FromResult(new HttpResponseMessage(r.Value.Item1)
-            {
-                Content = new StringContent(r.Value.Item2, Encoding.UTF8, "application/json"),
-            });
-        }
-    }
+            Content = new StringContent(r.Value.Item2, Encoding.UTF8, "application/json"),
+        };
+    });
 
     private static (ConductorPoller Poller, FakeMt Mt, List<string> GhCalls) Create(
         Func<string, (HttpStatusCode, string)?> route, string? originUrl = null)
@@ -131,41 +125,6 @@ public class ConductorPollerTests
     }
 
     [Fact]
-    public async Task Upstream_remote_wins_over_origin_for_forks()
-    {
-        var calls = new List<string>();
-        var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), (req, _) =>
-        {
-            calls.Add(req.Split('|')[0]);
-            return Task.FromResult(req.StartsWith("upstream|")
-                ? (0, "https://github.com/ClarionLive/multiterminal.git\n")
-                : (0, "https://github.com/msarson/multiterminal.git\n"));
-        });
-
-        var url = await resolver.GetOriginUrlAsync(Path.GetTempPath(), CancellationToken.None);
-
-        Assert.Equal("https://github.com/ClarionLive/multiterminal.git", url);
-        Assert.Equal(["upstream"], calls);
-    }
-
-    [Fact]
-    public async Task Origin_used_when_there_is_no_upstream()
-    {
-        var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), (req, _) =>
-            Task.FromResult(req.StartsWith("origin|") ? (0, "https://github.com/me/x\n") : (2, "")));
-        Assert.Equal("https://github.com/me/x", await resolver.GetOriginUrlAsync(Path.GetTempPath(), CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task Missing_folder_or_origin_means_no_repo()
-    {
-        var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), (_, _) => Task.FromResult((128, "")));
-        Assert.Null(await resolver.GetOriginUrlAsync(@"Z:\definitely\not\here", CancellationToken.None));
-        Assert.Null(await resolver.GetOriginUrlAsync(Path.GetTempPath(), CancellationToken.None));
-        Assert.Null(await resolver.GetOriginUrlAsync(null, CancellationToken.None));
-    }
-
-    [Fact]
     public void Merge_removes_duplicate_ids_keeping_the_latest_and_converts_utc()
     {
         var utc = new DateTime(2026, 7, 1, 12, 0, 0, DateTimeKind.Unspecified); // as MT sends it
@@ -218,18 +177,6 @@ public class ConductorPollerTests
 
         Assert.Contains("tasks unavailable", view.Warnings!);
         Assert.DoesNotContain("tasks unavailable (showing last known)", view.Warnings!);
-    }
-
-    [Theory]
-    [InlineData(@"C:\work\proj", true)]
-    [InlineData("C:/work/proj", true)]
-    [InlineData(@"\\server\share\proj", false)]
-    [InlineData(@"\\?\C:\proj", false)]
-    [InlineData(@"\\.\pipe\x", false)]
-    [InlineData(@"relative\proj", false)]
-    public void Only_local_drive_paths_are_resolved(string path, bool expected)
-    {
-        Assert.Equal(expected, GitRemoteResolver.IsLocalPath(path));
     }
 
     [Fact]
