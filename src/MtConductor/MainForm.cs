@@ -186,21 +186,30 @@ public sealed class MainForm : Form
     /// </summary>
     private async Task OpenProjectAsync(string? projectId)
     {
-        if (string.IsNullOrEmpty(projectId)
-            || _lastView is not { MtOnline: true } view
-            || !view.Cards.Any(c => c.Id == projectId)
-            || !_opening.Add(projectId))
+        if (string.IsNullOrEmpty(projectId)) return;
+
+        // Every path answers the page, so its "Asking MT…" state always ends.
+        if (_lastView is not { MtOnline: true } view)
+        {
+            PostOpenResult(projectId, new MtOpenResult(MtOpenKind.Offline));
             return;
+        }
+        if (!view.Cards.Any(c => c.Id == projectId))
+        {
+            PostOpenResult(projectId, new MtOpenResult(MtOpenKind.Failed, Detail: "That project isn't on screen any more."));
+            return;
+        }
+        if (!_opening.Add(projectId)) return;   // already asking; that request will answer
 
         MtOpenResult result;
         try
         {
-            if (_poller.MtPid is { } pid) NativeMethods.AllowSetForegroundWindow(pid);
+            AllowMtToTakeForeground();
             result = await _poller.OpenProjectAsync(projectId, _closing.Token);
         }
         catch (OperationCanceledException)
         {
-            return;
+            return;   // closing
         }
         catch (Exception ex)
         {
@@ -212,25 +221,54 @@ public sealed class MainForm : Form
             _opening.Remove(projectId);
         }
 
+        PostOpenResult(projectId, result);
+    }
+
+    /// <summary>
+    /// Windows only lets the foreground process hand focus to another. The pid comes from an
+    /// unauthenticated local health check, so it is only granted if that process really is
+    /// MultiTerminal (read-only lookup; never starts or stops anything).
+    /// </summary>
+    private void AllowMtToTakeForeground()
+    {
+        if (_poller.MtPid is not { } pid) return;
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(pid);
+            if (!process.ProcessName.Equals("MultiTerminal", StringComparison.OrdinalIgnoreCase)) return;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return;   // gone, or not ours to look at
+        }
+        NativeMethods.AllowSetForegroundWindow(pid);
+    }
+
+    // The page's switch on "kind" pins these lower-cased MtOpenKind names (focused, launching,
+    // notfound, failed, unsupported, offline, noanswer).
+    private void PostOpenResult(string projectId, MtOpenResult result)
+    {
         if (!_pageReady) return;
         var message = new
         {
             type = "openResult",
             projectId,
             kind = result.Kind.ToString().ToLowerInvariant(),
-            result.PaneTitle,
+            paneTitle = Clip(result.PaneTitle),
             result.Floating,
             result.OtherPanes,
-            result.Detail,
+            detail = Clip(result.Detail),
         };
         _webView.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(message, MtJson.Options));
     }
 
+    private static string? Clip(string? text) => text is { Length: > 200 } ? text[..200] + "…" : text;
+
     private static class NativeMethods
     {
         // Lets MT (a different process) bring its own window to the front when it handles Open.
-        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool AllowSetForegroundWindow(int processId);
     }
 

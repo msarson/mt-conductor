@@ -56,7 +56,7 @@ public sealed class ConductorPoller
         OpenSupported = result.Kind switch
         {
             MtOpenKind.Unsupported => false,
-            MtOpenKind.Offline => OpenSupported,
+            MtOpenKind.Offline or MtOpenKind.NoAnswer => OpenSupported,
             _ => true,
         };
         return result;

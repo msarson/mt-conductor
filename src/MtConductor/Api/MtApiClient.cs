@@ -91,6 +91,8 @@ public sealed class MtApiClient
                     var kind = resp.StatusCode == HttpStatusCode.OK ? MtOpenKind.Focused : MtOpenKind.Launching;
                     return new MtOpenResult(kind, body.ProjectName, body.PaneTitle, body.Floating, Math.Max(0, body.OtherPanes));
 
+                // Relies on MT not adding status-code pages: today a missing route is a bare 404,
+                // while #103's unknown-project 404 always carries a problem+json body (pinned by tests).
                 case HttpStatusCode.NotFound when !isProblem:
                 case HttpStatusCode.MethodNotAllowed:
                     return new MtOpenResult(MtOpenKind.Unsupported);
@@ -101,6 +103,11 @@ public sealed class MtApiClient
                         resp.StatusCode == HttpStatusCode.NotFound ? MtOpenKind.NotFound : MtOpenKind.Failed,
                         Detail: detail ?? $"MT answered {(int)resp.StatusCode}.");
             }
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // MT runs the open on its UI thread; a modal dialog there holds the reply back.
+            return new MtOpenResult(MtOpenKind.NoAnswer);
         }
         catch (Exception ex) when (IsExpected(ex, ct))
         {

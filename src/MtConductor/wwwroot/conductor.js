@@ -118,10 +118,14 @@
     // project is, if an agent has it open, and nothing more.
     hint.textContent = card.openHint;
     hint.hidden = !openHints.has(card.id);
+    const note = liveNote(card.id);   // e.g. the "needs a newer MT" answer to the click just made
+    if (note) {
+      hint.textContent = note;
+      hint.hidden = false;
+    }
     if (card.activeAgents.length === 0) {
       openBtn.disabled = true;
       openBtn.title = OPEN_UNSUPPORTED;
-      hint.hidden = true;
       return el;
     }
     openBtn.title = `Shows which agent is working on this project. ${OPEN_UNSUPPORTED}`;
@@ -136,45 +140,63 @@
   // ---- Open (MT's POST /api/projects/{id}/open, sent by the host) ----
 
   const OPEN_UNSUPPORTED = "Opening from here needs a newer MT (ClarionLive/multiterminal#103).";
-  const LAUNCH_TIMEOUT_MS = 90_000;
+  const LAUNCH_WATCH_MS = 90_000;   // how long to watch for a new agent after a launch
+  const PENDING_MS = 15_000;        // the host always answers; this is only a backstop
   const NOTE_MS = 10_000;
-  let openSupported = null;         // from the view; null = not tried yet
-  // projectId -> { pending, launchingSince, text, until }
+  let openSupported = null;         // from the host's view; null = not tried yet
+  // projectId -> { text, pendingSince?, launchingSince?, agentsBefore?, until?, busyUntil? }
   const openState = new Map();
+
+  // A note that hasn't expired yet, or null (and forget expired ones).
+  function liveNote(id) {
+    const st = openState.get(id);
+    if (!st) return null;
+    if (st.until && Date.now() > st.until) {
+      openState.delete(id);
+      return null;
+    }
+    return st.text;
+  }
+
+  function showHint(hint, text) {
+    hint.textContent = text || "";
+    hint.hidden = !text;
+  }
 
   function renderOpen(card, openBtn, hint) {
     const now = Date.now();
     let st = openState.get(card.id);
 
-    // A launch is done once an agent shows up on the project, or gives up after the timeout.
+    if (st && st.pendingSince && now - st.pendingSince > PENDING_MS) {
+      st = { text: "MT didn't answer.", until: now + NOTE_MS };
+      openState.set(card.id, st);
+    }
+    // After a launch, only an agent that wasn't there before counts as "it opened". A new PM
+    // with no active task can't be seen from here, so running out of time claims nothing.
     if (st && st.launchingSince) {
-      if (card.activeAgents.length > 0) {
-        st = { text: `Open: ${card.activeAgents.join(", ")}`, until: now + NOTE_MS };
+      const fresh = card.activeAgents.filter((a) => !st.agentsBefore.includes(a));
+      if (fresh.length > 0) {
+        st = { text: `Open: ${fresh.join(", ")}`, until: now + NOTE_MS };
         openState.set(card.id, st);
-      } else if (now - st.launchingSince > LAUNCH_TIMEOUT_MS) {
-        // We only see agents that have an active task here, so this is "can't tell", not "failed".
-        st = { text: "Couldn't confirm it opened. Check MT: it may be asking how to start, or the launch was cancelled.", until: now + NOTE_MS * 3 };
+      } else if (now - st.launchingSince > LAUNCH_WATCH_MS) {
+        st = { text: "Launch requested in MT. If nothing appeared, MT may be asking how to start.", until: now + NOTE_MS * 2 };
         openState.set(card.id, st);
       }
     }
-    if (st && st.until && now > st.until) {
-      openState.delete(card.id);
-      st = undefined;
-    }
+    const text = liveNote(card.id);
+    st = openState.get(card.id);
 
-    openBtn.disabled = !!(st && (st.pending || st.launchingSince));
+    openBtn.disabled = !!(st && (st.pendingSince || st.launchingSince || (st.busyUntil && now < st.busyUntil)));
     openBtn.title = card.activeAgents.length > 0
-      ? "Bring this project's PM pane to the front in MT"
-      : "Open this project in MT where you left off";
-    hint.textContent = st ? st.text : "";
-    hint.hidden = !st;
+      ? "Open in MT: brings up the pane that has this project open"
+      : "Open in MT: starts this project the way its launch setting says (new, continue or ask)";
+    showHint(hint, text);
 
     openBtn.addEventListener("click", () => {
       if (!host) return;
-      openState.set(card.id, { pending: true, text: "Asking MT…" });
+      openState.set(card.id, { pendingSince: Date.now(), text: "Asking MT…" });
       openBtn.disabled = true;
-      hint.textContent = "Asking MT…";
-      hint.hidden = false;
+      showHint(hint, "Asking MT…");
       host.postMessage({ type: "openProject", projectId: card.id });
     });
   }
@@ -182,27 +204,36 @@
   function onOpenResult(msg) {
     const now = Date.now();
     const note = (text, ms = NOTE_MS) => ({ text, until: now + ms });
+    const card = lastView && lastView.cards.find((c) => c.id === msg.projectId);
     let st;
     switch (msg.kind) {
       case "focused": {
-        let text = `Switched to ${msg.paneTitle || "its pane"}`;
+        let text = `Asked MT to bring up ${msg.paneTitle || "its pane"}`;
         if (msg.floating) text += " (floating window)";
         if (msg.otherPanes > 0) text += ` · ${plural(msg.otherPanes, "other pane", "other panes")} also have it open`;
         st = note(text);
         break;
       }
       case "launching":
-        st = { launchingSince: now, text: "Opening in MT… answer MT if it asks how to start." };
+        st = {
+          launchingSince: now,
+          agentsBefore: card ? card.activeAgents.slice() : [],
+          text: "Starting in MT… answer MT if it asks how to start.",
+        };
         break;
       case "notfound":
         st = note(`MT doesn't know this project. ${msg.detail || ""}`.trim(), NOTE_MS * 2);
         break;
       case "unsupported":
-        openSupported = false;
+        openSupported = false;   // the host's next view says the same
         st = note(OPEN_UNSUPPORTED, NOTE_MS * 2);
         break;
       case "offline":
-        st = note("MT isn't answering.");
+        st = note("MT isn't running or isn't reachable.");
+        break;
+      case "noanswer":
+        // The open may still happen once MT's dialog closes: don't invite a second launch at once.
+        st = { ...note("MT didn't answer in time. It may be showing a dialog; the open can still happen.", NOTE_MS * 3), busyUntil: now + NOTE_MS * 3 };
         break;
       default:
         st = note(`MT couldn't open it. ${msg.detail || ""}`.trim(), NOTE_MS * 2);
@@ -236,14 +267,20 @@
         + "(idle, desk activity, phone).";
     }
 
-    // Offline: keep the last cards on screen, dimmed.
-    if (!view.mtOnline) return;
+    // Offline: keep the last cards on screen, dimmed, with nothing to click through to.
+    if (!view.mtOnline) {
+      for (const b of cardsEl.querySelectorAll("button.open")) b.disabled = true;
+      return;
+    }
 
+    // A new view from the host is the authority on Open support (it forgets when MT restarts).
+    // Re-rendering the same view after an openResult keeps what that result just taught us.
+    if (view !== lastView) {
+      openSupported = view.openSupported ?? null;
+      const ids = new Set(view.cards.map((c) => c.id));
+      for (const id of openState.keys()) if (!ids.has(id)) openState.delete(id);
+    }
     lastView = view;
-    // The host's knowledge wins, except that an "unsupported" answer we just got sticks until
-    // the host has seen it too (it resets when MT restarts).
-    if (view.openSupported !== null && view.openSupported !== undefined) openSupported = view.openSupported;
-    else if (openSupported !== false) openSupported = null;
 
     cardsEl.replaceChildren(...view.cards.map(renderCard));
     hasCards = view.cards.length > 0;

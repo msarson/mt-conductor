@@ -227,4 +227,23 @@ public class MtApiClientTests
             { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) });
         Assert.Equal(MtOpenKind.Offline, (await client.OpenProjectAsync("x", CancellationToken.None)).Kind);
     }
+
+    [Fact]
+    public async Task Open_timeout_is_no_answer_not_offline()
+    {
+        // HttpClient reports its own timeout as a TaskCanceledException the caller didn't ask for.
+        var client = new MtApiClient(new HttpClient(new FakeHandler(_ => throw new TaskCanceledException("timeout")))
+            { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) });
+        Assert.Equal(MtOpenKind.NoAnswer, (await client.OpenProjectAsync("x", CancellationToken.None)).Kind);
+    }
+
+    [Fact]
+    public async Task Open_cancelled_by_the_caller_still_throws()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var client = new MtApiClient(new HttpClient(new FakeHandler(_ => throw new TaskCanceledException()))
+            { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.OpenProjectAsync("x", cts.Token));
+    }
 }

@@ -23,8 +23,10 @@ public enum MtOpenKind
     Failed,
     /// <summary>Bare 404 or 405: this MT has no Open endpoint (older than #103).</summary>
     Unsupported,
-    /// <summary>No answer at all: MT offline or timed out.</summary>
+    /// <summary>No connection: MT offline.</summary>
     Offline,
+    /// <summary>Connected but no answer in time: MT's window may be showing a dialog. The open may still happen.</summary>
+    NoAnswer,
 }
 
 public sealed record MtOpenResult(
