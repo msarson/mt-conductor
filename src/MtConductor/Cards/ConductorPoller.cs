@@ -90,6 +90,14 @@ public sealed class ConductorPoller
         return result;
     }
 
+    // A flip while MT was unreachable can't be dated (we only learn of it on reconnect), so after an
+    // offline tick the next value counts as a first sighting again.
+    private void ForgetRemote()
+    {
+        _lastRemote = null;
+        _remoteChangedAt = null;
+    }
+
     private void TrackRemote(bool? polled, DateTime now)
     {
         if (polled is not { } on) return;   // unknown this tick: keep what we had
@@ -134,7 +142,10 @@ public sealed class ConductorPoller
 
         var health = await _mt.GetHealthAsync(ct);
         if (health is null)
+        {
+            ForgetRemote();
             return ProjectCardBuilder.Build(Offline(now));
+        }
 
         ApplyHealth(health);
 
@@ -158,7 +169,10 @@ public sealed class ConductorPoller
         await Task.WhenAll(projectsTask, inProgressTask, todoTask, inboxTask, notificationsTask, terminalsTask, remoteTask);
 
         if (projectsTask.Result is null)
+        {
+            ForgetRemote();
             return ProjectCardBuilder.Build(Offline(now)); // health answered but the API isn't usable
+        }
 
         // Every per-project dictionary below is keyed by id: drop rows without one, and duplicates.
         IReadOnlyList<MtProject> projects = projectsTask.Result

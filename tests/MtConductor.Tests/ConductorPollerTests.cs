@@ -299,6 +299,39 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public async Task Remote_mode_flip_while_MT_was_offline_is_not_stamped_with_the_reconnect_time()
+    {
+        var remote = true;
+        var online = true;
+        var clock = Now;
+        var mt = new FakeMt(pq => !online ? null : pq == "/api/remote-mode"
+            ? (HttpStatusCode.OK, $$"""{"remote_mode":{{(remote ? "true" : "false")}}}""")
+            : HealthyMt(pq));
+        var poller = new ConductorPoller(
+            new MtApiClient(new HttpClient(mt) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) }),
+            new GhPrClient(TimeSpan.FromMinutes(2), (_, _, _) => Task.FromResult((1, "")), (_, _) => Task.FromResult((1, ""))),
+            new GitRemoteResolver(TimeSpan.FromMinutes(10), (_, _) => Task.FromResult((128, ""))),
+            () => clock);
+
+        await poller.RefreshAsync(CancellationToken.None);
+        remote = false;
+        clock = Now.AddMinutes(1);
+        Assert.Equal(clock, (await poller.RefreshAsync(CancellationToken.None)).RemoteModeChangedAt);   // seen flipping: dated
+
+        online = false;
+        clock = Now.AddMinutes(2);
+        Assert.False((await poller.RefreshAsync(CancellationToken.None)).MtOnline);
+
+        remote = true;                 // flipped while we couldn't see it
+        online = true;
+        clock = Now.AddMinutes(9);
+        var back = await poller.RefreshAsync(CancellationToken.None);
+
+        Assert.True(back.RemoteMode);
+        Assert.Null(back.RemoteModeChangedAt);   // first sighting again: no made-up time
+    }
+
+    [Fact]
     public async Task Open_learns_support_and_forgets_it_when_MT_restarts()
     {
         var pid = 1;
