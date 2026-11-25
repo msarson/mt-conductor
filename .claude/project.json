@@ -2,8 +2,8 @@
   "id": "8eaa1885",
   "name": "Multi Terminal Conductor",
   "description": "MT Conductor: a small standalone Windows app (.NET 8 WinForms + WebView2) that gives one overview card per MultiTerminal project, open or not, using only MT's public REST API on localhost:5050.",
-  "changeLog": null,
-  "currentVersion": "0.1.0",
+  "changeLog": "## v0.1.1 - 2026-11-25\n- Card button says \"Switch to\" when the project is open in MT, \"Open\" otherwise, from MT's open-state (#103) [Task #d54f0748]\n- Follow-ups: shared gh/git runner from absolute PATH only, PR source and \"yours\" shown on hover, PR fault and gh-missing warnings, hover lists behind the numbers, clearer disabled buttons, Open capability flag and pid refresh [Task #908c8693]\n- Open focuses a project's pane or launches it through MT's Open endpoint (ClarionLive/multiterminal#103) [Task #42035abd]\n- Remote mode pill shows when it last changed; the remote-mode toggle was dropped after review, so Carry on and Pause wait for an MT change [Task #5a233e54]\n- Phase 1: one card per MT project with PM, where you left off, tasks, PRs, questions and the \"needs you\" dot [Task #51459adc]\n\n",
+  "currentVersion": "0.1.1",
   "createdAt": "2026-10-31T13:04:04.5872850+00:00",
   "lastOpenedAt": "2026-10-31T13:05:22.2310459+00:00",
   "isPinned": false,
@@ -11,8 +11,6 @@
   "prompts": [
   ],
   "team": {
-    "agents": [
-      { "name": "Diana", "role": "fullstack" }
-    ]
+    "agents": []
   }
 }
