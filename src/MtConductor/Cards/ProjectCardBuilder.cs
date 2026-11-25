@@ -45,7 +45,7 @@ public sealed record ProjectCard(
     // What's behind the numbers, for hover text: task titles (at most TitleListMax, then "+N more").
     IReadOnlyList<string>? InProgressTitles = null,
     IReadOnlyList<string>? ToDoTitles = null,
-    IReadOnlyList<string>? AwaitingTestTitles = null,    // "Title (3 items)" for each task with items ready to test
+    IReadOnlyList<string>? AwaitingTestTip = null,       // hover lines: a header, then "Title (3 items)" per task with items ready to test
     IReadOnlyList<string>? ReasonDetails = null,
     string? PrRepo = null,                              // owner/repo the PRs come from (for the PR line's tooltip)
     string? GitHubLogin = null,                         // gh login "yours" means; null = unknown
@@ -187,7 +187,7 @@ public static class ProjectCardBuilder
             .Where(x => x.Testing > 0)
             .ToList();
         var awaitingTest = awaiting.Sum(x => x.Testing);
-        var awaitingTitles = CapTitles(awaiting.Select(x => x.Testing == 1 ? x.Title : $"{x.Title} ({x.Testing} items)"));
+        var awaitingTip = AwaitingTip(awaiting);
 
         var activeAgents = inProgress
             .Where(t => string.Equals(t.SubStatus, "active", StringComparison.OrdinalIgnoreCase)
@@ -205,7 +205,7 @@ public static class ProjectCardBuilder
         if (escalations > 0)
             reasonPairs.Add((Plural(escalations, "escalation", "escalations"), ""));
         if (awaitingTest > 0)
-            reasonPairs.Add((Plural(awaitingTest, "item ready for you to test", "items ready for you to test"), string.Join("\n", awaitingTitles)));
+            reasonPairs.Add((Plural(awaitingTest, "item ready for you to test", "items ready for you to test"), string.Join("\n", awaitingTip)));
         var reasons = reasonPairs.Select(r => r.Text).ToList();
         var reasonDetails = reasonPairs.Select(r => r.Detail).ToList();
 
@@ -253,7 +253,7 @@ public static class ProjectCardBuilder
             PrOwnerKnown: s.GitHubLogin is not null,
             InProgressTitles: CapTitles(inProgress.Select(t => t.Title)),
             ToDoTitles: CapTitles(toDoTasks.Select(t => t.Title)),
-            AwaitingTestTitles: awaitingTitles,
+            AwaitingTestTip: awaitingTip,
             ReasonDetails: reasonDetails,
             PrRepo: GhPrClient.ParseOwnerRepo(p.GitRepoUrl),
             GitHubLogin: s.GitHubLogin,
@@ -295,6 +295,27 @@ public static class ProjectCardBuilder
         if (fromTask is { } onlyTask) return onlyTask;
         if (fromSession is { } onlySession) return onlySession;
         return (null, null);
+    }
+
+    internal const string AwaitingTestHeader = "Tasks with items ready to test:";
+
+    /// <summary>
+    /// Hover text for the ready-to-test count: it lists tasks (not items), so it says so, and the
+    /// overflow line carries the item total too: "+3 more tasks, 7 items".
+    /// </summary>
+    internal static IReadOnlyList<string> AwaitingTip(IReadOnlyList<(string Title, int Testing)> awaiting)
+    {
+        string Name(string t) => string.IsNullOrWhiteSpace(t) ? "(untitled)" : t.Trim();
+        var lines = new List<string> { AwaitingTestHeader };
+        lines.AddRange(awaiting.Take(TitleListMax)
+            .Select(x => x.Testing == 1 ? Name(x.Title) : $"{Name(x.Title)} ({x.Testing} items)"));
+        if (awaiting.Count > TitleListMax)
+        {
+            var rest = awaiting.Skip(TitleListMax).ToList();
+            var items = rest.Sum(x => x.Testing);
+            lines.Add($"+{Plural(rest.Count, "more task", "more tasks")}, {Plural(items, "item", "items")}");
+        }
+        return lines;
     }
 
     /// <summary>The first <see cref="TitleListMax"/> titles, then "+N more".</summary>

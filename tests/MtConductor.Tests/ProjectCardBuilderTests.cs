@@ -421,10 +421,10 @@ public class ProjectCardBuilderTests
         Assert.Equal(["Task 1", "Task 2", "Task 3"], card.InProgressTitles);
         Assert.Equal(["Task 4", "Task 5"], card.ToDoTitles);
         Assert.Equal(3, card.AwaitingTest);
-        Assert.Equal(["Task 1 (2 items)", "Task 2"], card.AwaitingTestTitles);
+        Assert.Equal([ProjectCardBuilder.AwaitingTestHeader, "Task 1 (2 items)", "Task 2"], card.AwaitingTestTip);
         // The needs-you reason for items to test carries the same list as its hover text.
         Assert.Equal(card.NeedsYouReasons.Count, card.ReasonDetails!.Count);
-        Assert.Equal("Task 1 (2 items)\nTask 2", card.ReasonDetails[^1]);
+        Assert.Equal("Tasks with items ready to test:\nTask 1 (2 items)\nTask 2", card.ReasonDetails[^1]);
     }
 
     [Fact]
@@ -464,5 +464,19 @@ public class ProjectCardBuilderTests
 
         Assert.False(cards.Single(c => c.Id == "p").OthersKnown);
         Assert.True(cards.Single(c => c.Id == "q").OthersKnown);
+    }
+
+    [Fact]
+    public void Ready_to_test_overflow_counts_the_tasks_and_items_left_out()
+    {
+        var tasks = Enumerable.Range(1, 13)
+            .Select(i => Task(i.ToString(), "p", "in_progress", """[{"item":"a","status":"testing"},{"item":"b","status":"testing"}]"""))
+            .ToList();
+
+        var card = ProjectCardBuilder.Build(Snapshot([Project("p", "P", @"C:\p")], tasks)).Cards.Single();
+
+        Assert.Equal(26, card.AwaitingTest);
+        Assert.Equal(1 + ProjectCardBuilder.TitleListMax + 1, card.AwaitingTestTip!.Count);
+        Assert.Equal("+3 more tasks, 6 items", card.AwaitingTestTip[^1]);
     }
 }

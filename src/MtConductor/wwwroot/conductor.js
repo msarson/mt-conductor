@@ -128,7 +128,7 @@
     const counts = [
       [`${card.inProgress} in progress`, card.inProgressTitles],
       [`${card.toDo} to do`, card.toDoTitles],
-      [`${card.awaitingTest} ready for me to test`, card.awaitingTestTitles],
+      [`${card.awaitingTest} ready for me to test`, card.awaitingTestTip],
     ];
     tasks.append("Tasks: ");
     counts.forEach(([text, titles], i) => {
