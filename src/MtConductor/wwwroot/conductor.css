@@ -129,9 +129,9 @@ button {
   cursor: pointer;
 }
 button:hover:not(:disabled) { border-color: var(--accent); }
-button:disabled {
-  cursor: not-allowed;
-  color: var(--muted);
+button:disabled { cursor: not-allowed; color: var(--muted); }
+/* Only the not-yet-possible actions look "greyed out"; Open's brief pending state keeps the plain look. */
+button.later:disabled {
   background: transparent;
   border-style: dashed;
   opacity: 0.55;
