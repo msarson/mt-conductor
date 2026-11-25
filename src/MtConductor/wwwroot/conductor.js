@@ -24,9 +24,12 @@
     return `${n} ${n === 1 ? one : many}`;
   }
 
-  function timeText(iso) {
+  function timeText(iso, noSeconds = false) {
     const d = new Date(iso);
-    return isNaN(d) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    if (isNaN(d)) return "";
+    return d.toLocaleTimeString([], noSeconds
+      ? { hour: "2-digit", minute: "2-digit" }
+      : { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
   function renderPrs(container, card) {
@@ -264,10 +267,8 @@
       remoteEl.hidden = true;
     } else {
       remoteEl.hidden = false;
-      const changed = view.remoteModeChangedAt ? new Date(view.remoteModeChangedAt) : null;
-      const since = changed && !isNaN(changed)
-        ? ` · since ${changed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-        : "";
+      const changedText = view.remoteModeChangedAt ? timeText(view.remoteModeChangedAt, true) : "";
+      const since = changedText ? ` · since ${changedText}` : "";
       remoteEl.textContent = `Remote mode: ${view.remoteMode ? "on" : "off"}${since}`;
       remoteEl.title = "MT's remote mode is one switch for all projects. When it's on, agents' questions go "
         + "to your phone for a few minutes before falling back to their panes. MT turns it on and off itself "
