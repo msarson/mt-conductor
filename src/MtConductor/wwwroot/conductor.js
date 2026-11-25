@@ -40,6 +40,14 @@
     el.classList.add("tip");
   }
 
+  // Where the PR numbers come from and whose "yours" is, so a surprising list can be traced.
+  function prSource(card) {
+    if (!card.prRepo) return "";
+    return card.githubLogin
+      ? `PRs from ${card.prRepo}, yours = ${card.githubLogin} (gh login)`
+      : `PRs from ${card.prRepo}. gh login unknown, so they aren't split into yours and others'.`;
+  }
+
   function renderPrs(container, card) {
     container.replaceChildren();
     container.title = "";
@@ -50,6 +58,7 @@
         : "No gitRepoUrl in MT and no upstream or origin remote in the project folder.";
       return;
     }
+    container.title = prSource(card);
     const others = card.otherPullRequests > 0 ? ` +${card.otherPullRequests} by others` : "";
     if (card.pullRequests.length === 0) {
       container.textContent = others ? `PRs: none of yours open ·${others}` : "PRs: none open";

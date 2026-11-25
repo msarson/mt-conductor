@@ -440,4 +440,19 @@ public class ProjectCardBuilderTests
         Assert.Equal(["a"], ProjectCardBuilder.CapTitles(["a"]));
         Assert.Equal(["(untitled)"], ProjectCardBuilder.CapTitles([" "]));
     }
+
+    [Fact]
+    public void Card_says_which_repo_and_login_its_PRs_are_about()
+    {
+        var projects = new[] { Project("p", "P", @"C:\p", repo: "https://github.com/ClarionLive/multiterminal.git") };
+
+        var known = ProjectCardBuilder.Build(Snapshot(projects) with { GitHubLogin = "msarson" }).Cards.Single();
+        var unknown = ProjectCardBuilder.Build(Snapshot(projects)).Cards.Single();
+        var none = ProjectCardBuilder.Build(Snapshot([Project("q", "Q", @"C:\q")])).Cards.Single();
+
+        Assert.Equal("ClarionLive/multiterminal", known.PrRepo);
+        Assert.Equal("msarson", known.GitHubLogin);
+        Assert.Null(unknown.GitHubLogin);
+        Assert.Null(none.PrRepo);
+    }
 }

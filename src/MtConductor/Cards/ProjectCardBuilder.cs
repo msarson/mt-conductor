@@ -45,7 +45,9 @@ public sealed record ProjectCard(
     IReadOnlyList<string>? InProgressTitles = null,
     IReadOnlyList<string>? ToDoTitles = null,
     IReadOnlyList<string>? AwaitingTestTitles = null,    // "Title (3 items)" for each task with items ready to test
-    IReadOnlyList<string>? ReasonDetails = null);        // parallel to NeedsYouReasons: hover text, "" when there is none
+    IReadOnlyList<string>? ReasonDetails = null,
+    string? PrRepo = null,                              // owner/repo the PRs come from (for the PR line's tooltip)
+    string? GitHubLogin = null);                        // gh login "yours" means; null = unknown        // parallel to NeedsYouReasons: hover text, "" when there is none
 
 public sealed record ConductorView(
     bool MtOnline,
@@ -257,7 +259,9 @@ public static class ProjectCardBuilder
             InProgressTitles: CapTitles(inProgress.Select(t => t.Title)),
             ToDoTitles: CapTitles(toDoTasks.Select(t => t.Title)),
             AwaitingTestTitles: awaitingTitles,
-            ReasonDetails: reasonDetails);
+            ReasonDetails: reasonDetails,
+            PrRepo: GhPrClient.ParseOwnerRepo(p.GitRepoUrl),
+            GitHubLogin: s.GitHubLogin);
     }
 
     /// <summary>
