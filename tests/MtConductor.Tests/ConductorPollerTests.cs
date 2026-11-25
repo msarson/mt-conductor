@@ -206,6 +206,24 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public async Task Missing_gh_shows_as_a_warning()
+    {
+        var mt = new FakeMt(HealthyMt);
+        var gh = new GhPrClient(TimeSpan.Zero, (_, _, _) => throw new ToolNotFoundException("gh"),
+            runGhArgs: (_, _) => throw new ToolNotFoundException("gh"));
+        var poller = new ConductorPoller(
+            new MtApiClient(new HttpClient(mt) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) }),
+            gh, new GitRemoteResolver(TimeSpan.FromMinutes(10), (_, _) => Task.FromResult((128, ""))), () => Now);
+
+        await poller.RefreshAsync(CancellationToken.None);
+        await poller.WaitForPrRefreshAsync();
+        var view = await poller.RefreshAsync(CancellationToken.None);
+
+        Assert.Contains("gh not found on PATH", view.Warnings!);
+        Assert.Null(view.Cards.Single().PullRequests);
+    }
+
+    [Fact]
     public void MergePrs_keeps_one_entry_per_number_and_null_only_when_both_failed()
     {
         PullRequestInfo Pr(int n, string? author) => new(n, "t", "u", false, "none", null, author);

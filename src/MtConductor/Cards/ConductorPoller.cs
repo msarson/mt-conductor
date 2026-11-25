@@ -218,6 +218,7 @@ public sealed class ConductorPoller
             gitHubLogin = _gitHubLogin;
         }
 
+        if (_gh.GhMissing) stale.Add("gh not found on PATH");   // says why PRs are unknown
         if (prFault) stale.Add("PRs unavailable");
 
         // Fill in repos found from the project folders so cards know a repo exists.

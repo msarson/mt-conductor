@@ -9,6 +9,9 @@ namespace MtConductor.Github;
 /// environment, and a timeout that kills the whole process tree. Throws <see cref="Win32Exception"/>
 /// when the tool can't be started; callers map that to "unknown".
 /// </summary>
+/// <summary>The tool isn't on PATH (as opposed to failing to start for another reason).</summary>
+internal sealed class ToolNotFoundException(string tool) : Win32Exception($"{tool}.exe was not found on PATH.");
+
 internal static class ProcessRunner
 {
     /// <summary>Runs <paramref name="tool"/> and returns its exit code and stdout, or (-1, "") on timeout.</summary>
@@ -16,7 +19,7 @@ internal static class ProcessRunner
         string tool, IEnumerable<string> args, TimeSpan timeout, CancellationToken ct)
     {
         // Absolute path from PATH only; a missing tool reads as "not installed", like before.
-        var exe = ToolPath.Find(tool) ?? throw new Win32Exception($"{tool}.exe was not found on PATH.");
+        var exe = ToolPath.Find(tool) ?? throw new ToolNotFoundException(tool);
         var psi = new ProcessStartInfo(exe)
         {
             UseShellExecute = false,

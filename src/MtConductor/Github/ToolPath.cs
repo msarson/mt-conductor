@@ -3,18 +3,21 @@ using System.Collections.Concurrent;
 namespace MtConductor.Github;
 
 /// <summary>
-/// Finds gh.exe and git.exe on PATH once and remembers the absolute path. Windows would otherwise
+/// Finds gh.exe and git.exe on PATH and remembers the absolute path (a "not found" only for a couple
+/// of minutes, so installing gh while the app runs is noticed). Windows would otherwise
 /// look in the app's folder and the current directory first, so an exe planted there could run in
 /// our place. Only absolute PATH folders count, and never the app folder or the current directory.
 /// </summary>
 internal static class ToolPath
 {
-    private static readonly ConcurrentDictionary<string, Lazy<string?>> Cache = new(StringComparer.OrdinalIgnoreCase);
+    internal static readonly TimeSpan NotFoundRetry = TimeSpan.FromMinutes(2);
+
+    private static readonly ToolPathCache Default = new(
+        t => Resolve(t, Environment.GetEnvironmentVariable("PATH"), AppContext.BaseDirectory, Environment.CurrentDirectory),
+        () => DateTime.UtcNow, NotFoundRetry);
 
     /// <summary>Absolute path of <paramref name="tool"/>.exe from PATH, or null when it isn't installed.</summary>
-    public static string? Find(string tool) =>
-        Cache.GetOrAdd(tool, t => new Lazy<string?>(() =>
-            Resolve(t, Environment.GetEnvironmentVariable("PATH"), AppContext.BaseDirectory, Environment.CurrentDirectory))).Value;
+    public static string? Find(string tool) => Default.Find(tool);
 
     internal static string? Resolve(string tool, string? pathVariable, string appDirectory, string currentDirectory)
     {
@@ -46,5 +49,20 @@ internal static class ToolPath
     {
         try { return Path.GetFullPath(dir).TrimEnd('\\', '/'); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return dir.TrimEnd('\\', '/'); }
+    }
+}
+
+/// <summary>Remembers where each tool was found; a miss is forgotten after <c>notFoundRetry</c>.</summary>
+internal sealed class ToolPathCache(Func<string, string?> resolve, Func<DateTime> utcNow, TimeSpan notFoundRetry)
+{
+    private readonly ConcurrentDictionary<string, (string? Path, DateTime At)> _cache = new(StringComparer.OrdinalIgnoreCase);
+
+    public string? Find(string tool)
+    {
+        if (_cache.TryGetValue(tool, out var hit) && (hit.Path is not null || utcNow() - hit.At < notFoundRetry))
+            return hit.Path;
+        var path = resolve(tool);
+        _cache[tool] = (path, utcNow());
+        return path;
     }
 }

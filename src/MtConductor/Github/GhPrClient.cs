@@ -40,6 +40,11 @@ public sealed class GhPrClient
 
     private readonly Func<string[], CancellationToken, Task<(int ExitCode, string StdOut)>> _runGhArgs;
 
+    private volatile bool _ghMissing;
+
+    /// <summary>True when the last gh call found no gh.exe on PATH (so "PRs unknown" has a cause the Owner can fix).</summary>
+    public bool GhMissing => _ghMissing;
+
     /// <summary>Returns open PRs for the repo, or null when unknown (gh missing, not logged in, timeout, bad repo URL).</summary>
     public Task<IReadOnlyList<PullRequestInfo>?> GetOpenPrsAsync(string? gitRepoUrl, CancellationToken ct) =>
         GetPrsAsync(gitRepoUrl, mine: false, ct);
@@ -65,16 +70,22 @@ public sealed class GhPrClient
         try
         {
             var (exitCode, stdout) = await _runGh(ownerRepo, mine, ct).ConfigureAwait(false);
+            _ghMissing = false;
             result = exitCode == 0 ? ParsePrJson(stdout) : null;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw; // the caller cancelled: don't cache anything
         }
+        catch (ToolNotFoundException)
+        {
+            _ghMissing = true;
+            result = null;
+        }
         catch (Exception ex) when (ex is Win32Exception or JsonException or InvalidOperationException
                                        or IOException or OperationCanceledException)
         {
-            result = null; // gh missing, bad output, or timed out
+            result = null; // gh failed to start, bad output, or timed out
         }
 
         _cache[key] = new CacheEntry(DateTime.UtcNow + _cacheDuration, result);
@@ -232,12 +243,17 @@ public sealed class GhPrClient
         try
         {
             var (exit, stdout) = await _runGhArgs(["api", "user", "--jq", ".login"], ct).ConfigureAwait(false);
+            _ghMissing = false;
             var line = stdout.Trim();
             if (exit == 0 && line.Length > 0 && !line.Contains(' ')) login = line;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (ToolNotFoundException)
+        {
+            _ghMissing = true;
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or OperationCanceledException)
         {

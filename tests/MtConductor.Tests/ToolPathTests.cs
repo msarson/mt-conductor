@@ -46,4 +46,26 @@ public class ToolPathTests : IDisposable
         Assert.Null(ToolPath.Resolve("gh", null, @"C:\app", @"C:\cwd"));
         Assert.Null(ToolPath.Resolve("nope", Make("real"), @"C:\app", @"C:\cwd"));
     }
+
+    [Fact]
+    public void A_miss_is_retried_after_a_while_but_a_hit_is_kept()
+    {
+        var clock = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var installed = false;
+        var lookups = 0;
+        var cache = new ToolPathCache(_ => { lookups++; return installed ? @"C:\tools\gh.exe" : null; }, () => clock, TimeSpan.FromMinutes(2));
+
+        Assert.Null(cache.Find("gh"));
+        installed = true;
+        clock = clock.AddMinutes(1);
+        Assert.Null(cache.Find("gh"));          // still remembered as missing
+        Assert.Equal(1, lookups);
+
+        clock = clock.AddMinutes(2);
+        Assert.Equal(@"C:\tools\gh.exe", cache.Find("gh"));   // looked again, found
+        installed = false;
+        clock = clock.AddHours(5);
+        Assert.Equal(@"C:\tools\gh.exe", cache.Find("gh"));   // a hit isn't re-resolved
+        Assert.Equal(2, lookups);
+    }
 }

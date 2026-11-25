@@ -32,4 +32,19 @@ public class GhPrClientAuthorTests
         var failing = new GhPrClient(TimeSpan.FromMinutes(5), runGh: null, runGhArgs: (_, _) => Task.FromResult((1, "")));
         Assert.Null(await failing.GetViewerLoginAsync(CancellationToken.None));
     }
+
+    [Fact]
+    public async Task Missing_gh_is_reported_and_clears_once_gh_runs()
+    {
+        var missing = true;
+        var client = new GhPrClient(TimeSpan.Zero, (_, _, _) =>
+            missing ? throw new ToolNotFoundException("gh") : Task.FromResult((0, "[]")));
+
+        Assert.Null(await client.GetOpenPrsAsync("o/r", CancellationToken.None));
+        Assert.True(client.GhMissing);
+
+        missing = false;
+        Assert.NotNull(await client.GetOpenPrsAsync("o/r", CancellationToken.None));
+        Assert.False(client.GhMissing);
+    }
 }
