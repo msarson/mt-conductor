@@ -48,7 +48,8 @@ public sealed record ConductorView(
     IReadOnlyList<ProjectCard> Cards,
     int UnmatchedQuestions,
     IReadOnlyList<string>? Warnings = null,    // e.g. "inbox unavailable": counts may be incomplete
-    DateTime? RemoteModeChangedAt = null);     // when MT's remote mode last flipped while we watched
+    DateTime? RemoteModeChangedAt = null,      // when MT's remote mode last flipped while we watched
+    bool? OpenSupported = null);               // MT has POST /api/projects/{id}/open; null = not tried yet
 
 /// <summary>
 /// Turns one <see cref="ConductorSnapshot"/> into the cards the page renders. Pure and

@@ -5,9 +5,10 @@ using System.Text.Json;
 namespace MtConductor.Api;
 
 /// <summary>
-/// Read-only client for MultiTerminal's local REST API. Every method returns null on any
-/// failure (MT offline, timeout, unexpected shape) instead of throwing, so the UI can show
-/// "MT offline" or "unknown" and keep polling. It only issues GET requests.
+/// Client for MultiTerminal's local REST API. Every method returns null (or an Offline result)
+/// on any failure (MT offline, timeout, unexpected shape) instead of throwing, so the UI can show
+/// "MT offline" or "unknown" and keep polling. Everything is a GET except
+/// <see cref="OpenProjectAsync"/>, which the Owner triggers by clicking Open on a card.
 /// </summary>
 public sealed class MtApiClient
 {
@@ -65,6 +66,59 @@ public sealed class MtApiClient
 
     public Task<MtRemoteMode?> GetRemoteModeAsync(CancellationToken ct) =>
         GetAsync<MtRemoteMode>("api/remote-mode", ct);
+
+    /// <summary>
+    /// Asks MT to bring the project's PM pane to the front, or to launch the project if no pane
+    /// has it open (ClarionLive/multiterminal#103). Never throws for MT being offline or old:
+    /// those come back as <see cref="MtOpenKind.Offline"/> and <see cref="MtOpenKind.Unsupported"/>.
+    /// An unknown project is a 404 with a problem+json body; a missing route is a bare 404.
+    /// </summary>
+    public async Task<MtOpenResult> OpenProjectAsync(string projectId, CancellationToken ct)
+    {
+        try
+        {
+            using var content = new ByteArrayContent([]);
+            using var resp = await _http.PostAsync($"api/projects/{Uri.EscapeDataString(projectId)}/open", content, ct);
+            var isProblem = resp.Content.Headers.ContentType?.MediaType == "application/problem+json";
+
+            switch (resp.StatusCode)
+            {
+                case HttpStatusCode.OK:
+                case HttpStatusCode.Accepted:
+                    // MT answered, so a body we can't read is a failure, not "offline".
+                    var body = await ReadJsonOrNullAsync<MtOpenResponse>(resp, ct);
+                    if (body is null) return new MtOpenResult(MtOpenKind.Failed, Detail: "MT's answer couldn't be read.");
+                    var kind = resp.StatusCode == HttpStatusCode.OK ? MtOpenKind.Focused : MtOpenKind.Launching;
+                    return new MtOpenResult(kind, body.ProjectName, body.PaneTitle, body.Floating, Math.Max(0, body.OtherPanes));
+
+                case HttpStatusCode.NotFound when !isProblem:
+                case HttpStatusCode.MethodNotAllowed:
+                    return new MtOpenResult(MtOpenKind.Unsupported);
+
+                default:
+                    var detail = isProblem ? (await ReadJsonOrNullAsync<MtProblem>(resp, ct))?.Detail : null;
+                    return new MtOpenResult(
+                        resp.StatusCode == HttpStatusCode.NotFound ? MtOpenKind.NotFound : MtOpenKind.Failed,
+                        Detail: detail ?? $"MT answered {(int)resp.StatusCode}.");
+            }
+        }
+        catch (Exception ex) when (IsExpected(ex, ct))
+        {
+            return new MtOpenResult(MtOpenKind.Offline);
+        }
+    }
+
+    private static async Task<T?> ReadJsonOrNullAsync<T>(HttpResponseMessage resp, CancellationToken ct) where T : class
+    {
+        try
+        {
+            return await resp.Content.ReadFromJsonAsync<T>(MtJson.Options, ct);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// The owner's inbox user id, derived the way MT does it: first word of the owner

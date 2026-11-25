@@ -258,6 +258,47 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public async Task Open_learns_support_and_forgets_it_when_MT_restarts()
+    {
+        var pid = 1;
+        var openStatus = HttpStatusCode.NotFound;   // older MT: bare 404 for the unknown route
+        var (poller, mt, _) = Create(pq => pq switch
+        {
+            "/api/health" => (HttpStatusCode.OK, $$"""{"service":"multiterminal-rest-api","pid":{{pid}}}"""),
+            "/api/projects/mt/open" => (openStatus, ""),
+            _ => HealthyMt(pq),
+        });
+
+        var first = await poller.RefreshAsync(CancellationToken.None);
+        Assert.Null(first.OpenSupported);
+        Assert.Equal(1, poller.MtPid);
+
+        Assert.Equal(MtOpenKind.Unsupported, (await poller.OpenProjectAsync("mt", CancellationToken.None)).Kind);
+        Assert.False((await poller.RefreshAsync(CancellationToken.None)).OpenSupported);
+
+        pid = 2;                                     // MT restarted, maybe as a newer build
+        Assert.Null((await poller.RefreshAsync(CancellationToken.None)).OpenSupported);
+
+        openStatus = HttpStatusCode.Accepted;
+        Assert.Equal(MtOpenKind.Failed, (await poller.OpenProjectAsync("mt", CancellationToken.None)).Kind); // empty 202 body
+        Assert.True((await poller.RefreshAsync(CancellationToken.None)).OpenSupported);
+
+        Assert.Equal(2, mt.Requests.Count(r => r.Method == HttpMethod.Post));
+        Assert.All(mt.Requests.Where(r => r.Method != HttpMethod.Get),
+            r => Assert.EndsWith("/open", r.RequestUri!.AbsolutePath));   // Open is the only write
+    }
+
+    [Fact]
+    public async Task Offline_open_does_not_change_what_we_know_about_support()
+    {
+        var (poller, _, _) = Create(pq => pq == "/api/projects/mt/open" ? null : HealthyMt(pq)); // null = connection refused
+        await poller.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(MtOpenKind.Offline, (await poller.OpenProjectAsync("mt", CancellationToken.None)).Kind);
+        Assert.Null(poller.OpenSupported);
+    }
+
+    [Fact]
     public async Task Session_lookups_are_throttled()
     {
         var (poller, mt, _) = Create(HealthyMt);

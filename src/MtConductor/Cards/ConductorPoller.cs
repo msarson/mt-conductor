@@ -7,7 +7,8 @@ namespace MtConductor.Cards;
 /// Gathers one <see cref="ConductorSnapshot"/> from MT's REST API (and gh for PRs) per call and
 /// builds the view. Slow sources are refreshed less often than the main tick:
 /// session summaries every <see cref="SessionRefresh"/>, PRs in the background via
-/// <see cref="GhPrClient"/>'s own cache. Read-only: only GET requests, never touches the MT process.
+/// <see cref="GhPrClient"/>'s own cache. Refreshes only GET; the one write is
+/// <see cref="OpenProjectAsync"/>, on the Owner's click. Never starts or stops the MT process.
 /// </summary>
 public sealed class ConductorPoller
 {
@@ -38,6 +39,28 @@ public sealed class ConductorPoller
     // idle timer, phone, presence sensor, its own switch); the API doesn't say which.
     private bool? _lastRemote;
     private DateTime? _remoteChangedAt;
+
+    /// <summary>MT's process id from the last good health check (for AllowSetForegroundWindow).</summary>
+    public int? MtPid { get; private set; }
+
+    /// <summary>
+    /// Whether this MT has the Open endpoint: null until an Open is tried, then true or false.
+    /// Forgotten when MT's pid changes, since a restarted MT may be a different build.
+    /// </summary>
+    public bool? OpenSupported { get; private set; }
+
+    /// <summary>The Open button: asks MT to focus or launch the project, and learns whether MT supports it.</summary>
+    public async Task<MtOpenResult> OpenProjectAsync(string projectId, CancellationToken ct)
+    {
+        var result = await _mt.OpenProjectAsync(projectId, ct);
+        OpenSupported = result.Kind switch
+        {
+            MtOpenKind.Unsupported => false,
+            MtOpenKind.Offline => OpenSupported,
+            _ => true,
+        };
+        return result;
+    }
 
     private void TrackRemote(bool? polled, DateTime now)
     {
@@ -84,6 +107,12 @@ public sealed class ConductorPoller
         var health = await _mt.GetHealthAsync(ct);
         if (health is null)
             return ProjectCardBuilder.Build(Offline(now));
+
+        if (health.Pid > 0 && health.Pid != MtPid)
+        {
+            MtPid = health.Pid;
+            OpenSupported = null;   // a restarted MT may be a different build
+        }
 
         if (now - _profileFetchedAt > OwnerProfileRefresh)
         {
@@ -171,7 +200,11 @@ public sealed class ConductorPoller
             stale);
 
         TrackRemote(remoteTask.Result?.RemoteMode, now);
-        return ProjectCardBuilder.Build(snapshot) with { RemoteModeChangedAt = _remoteChangedAt };
+        return ProjectCardBuilder.Build(snapshot) with
+        {
+            RemoteModeChangedAt = _remoteChangedAt,
+            OpenSupported = OpenSupported,
+        };
     }
 
     /// <summary>Waits for an in-flight PR refresh (tests and shutdown).</summary>

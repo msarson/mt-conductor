@@ -10,6 +10,38 @@ public sealed record MtHealth(string? Service, string? App, string? Version, int
 
 public sealed record MtProjectList(int Count, List<MtProject> Projects);
 
+/// <summary>What MT did with POST /api/projects/{id}/open (ClarionLive/multiterminal#103).</summary>
+public enum MtOpenKind
+{
+    /// <summary>200: an open PM pane was brought to the front.</summary>
+    Focused,
+    /// <summary>202: a launch was started; MT may still ask its usual questions, or the Owner may cancel.</summary>
+    Launching,
+    /// <summary>404 with a problem body: MT doesn't know that project id.</summary>
+    NotFound,
+    /// <summary>503, or another error status: MT couldn't act (window not ready, open threw).</summary>
+    Failed,
+    /// <summary>Bare 404 or 405: this MT has no Open endpoint (older than #103).</summary>
+    Unsupported,
+    /// <summary>No answer at all: MT offline or timed out.</summary>
+    Offline,
+}
+
+public sealed record MtOpenResult(
+    MtOpenKind Kind,
+    string? ProjectName = null,
+    string? PaneTitle = null,
+    bool Floating = false,
+    int OtherPanes = 0,
+    string? Detail = null);
+
+/// <summary>The 200/202 body of POST /api/projects/{id}/open.</summary>
+internal sealed record MtOpenResponse(string? Result, string? ProjectId, string? ProjectName,
+    string? PaneTitle, bool Floating, int OtherPanes);
+
+/// <summary>ASP.NET ProblemDetails, the error body MT sends.</summary>
+internal sealed record MtProblem(string? Title, string? Detail, int? Status);
+
 public sealed record MtProject(
     string Id,
     string Name,

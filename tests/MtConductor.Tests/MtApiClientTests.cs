@@ -150,4 +150,81 @@ public class MtApiClientTests
         Assert.Empty(MtJson.ParseChecklist(null));
         Assert.Empty(MtJson.ParseChecklist("not json"));
     }
+
+    // Bodies copied from MT's ProjectOpenController (#103) and from a live probe of MT 3.0.1.
+    private static (MtApiClient Client, FakeHandler Handler) OpenReturning(HttpStatusCode code, string? body, string mediaType)
+    {
+        var handler = new FakeHandler(_ => new HttpResponseMessage(code)
+        {
+            Content = body is null ? new ByteArrayContent([]) : new StringContent(body, Encoding.UTF8, mediaType),
+        });
+        return (new MtApiClient(new HttpClient(handler) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) }), handler);
+    }
+
+    [Fact]
+    public async Task Open_200_is_focused_with_pane_details_and_posts_to_the_escaped_route()
+    {
+        var (client, handler) = OpenReturning(HttpStatusCode.OK, """
+            {"result":"focused","projectId":"a b","projectName":"MultiTerminal","paneTitle":"Bob - MultiTerminal (PM)","floating":true,"otherPanes":2}
+            """, "application/json");
+
+        var r = await client.OpenProjectAsync("a b", CancellationToken.None);
+
+        Assert.Equal(new MtOpenResult(MtOpenKind.Focused, "MultiTerminal", "Bob - MultiTerminal (PM)", true, 2), r);
+        var req = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, req.Method);
+        Assert.Equal("/api/projects/a%20b/open", req.RequestUri!.AbsolutePath);
+    }
+
+    [Fact]
+    public async Task Open_202_is_launching()
+    {
+        var (client, _) = OpenReturning(HttpStatusCode.Accepted,
+            """{"result":"launching","projectId":"x","projectName":"X"}""", "application/json");
+
+        var r = await client.OpenProjectAsync("x", CancellationToken.None);
+
+        Assert.Equal(MtOpenKind.Launching, r.Kind);
+        Assert.Equal("X", r.ProjectName);
+    }
+
+    [Fact]
+    public async Task Open_404_with_problem_body_is_unknown_project_with_MTs_detail()
+    {
+        var (client, _) = OpenReturning(HttpStatusCode.NotFound,
+            """{"title":"Not Found","status":404,"detail":"Project 'x' not found"}""", "application/problem+json");
+
+        var r = await client.OpenProjectAsync("x", CancellationToken.None);
+
+        Assert.Equal(new MtOpenResult(MtOpenKind.NotFound, Detail: "Project 'x' not found"), r);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]          // older MT: no such route, empty body
+    [InlineData(HttpStatusCode.MethodNotAllowed)]
+    public async Task Open_without_the_endpoint_is_unsupported(HttpStatusCode code)
+    {
+        var (client, _) = OpenReturning(code, null, "application/json");
+        Assert.Equal(MtOpenKind.Unsupported, (await client.OpenProjectAsync("x", CancellationToken.None)).Kind);
+    }
+
+    [Fact]
+    public async Task Open_503_is_failed_with_MTs_reason()
+    {
+        var (client, _) = OpenReturning(HttpStatusCode.ServiceUnavailable,
+            """{"status":503,"detail":"MultiTerminal's window is not ready yet."}""", "application/problem+json");
+
+        var r = await client.OpenProjectAsync("x", CancellationToken.None);
+
+        Assert.Equal(MtOpenKind.Failed, r.Kind);
+        Assert.Equal("MultiTerminal's window is not ready yet.", r.Detail);
+    }
+
+    [Fact]
+    public async Task Open_when_MT_is_offline_is_offline_not_an_exception()
+    {
+        var client = new MtApiClient(new HttpClient(new FakeHandler(_ => throw new HttpRequestException("refused")))
+            { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) });
+        Assert.Equal(MtOpenKind.Offline, (await client.OpenProjectAsync("x", CancellationToken.None)).Kind);
+    }
 }

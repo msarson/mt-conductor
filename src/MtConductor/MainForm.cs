@@ -30,6 +30,9 @@ public sealed class MainForm : Form
     private ConductorView? _lastView;
     private bool _pageReady;
 
+    // Projects with an Open request in flight (UI thread only).
+    private readonly HashSet<string> _opening = new(StringComparer.Ordinal);
+
     public MainForm()
     {
         Text = "MT Conductor";
@@ -146,6 +149,7 @@ public sealed class MainForm : Form
 
         string? type;
         string? url = null;
+        string? projectId = null;
         try
         {
             using var doc = JsonDocument.Parse(e.WebMessageAsJson);
@@ -153,6 +157,7 @@ public sealed class MainForm : Form
             if (root.ValueKind != JsonValueKind.Object) return;
             type = root.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
             if (root.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String) url = u.GetString();
+            if (root.TryGetProperty("projectId", out var p) && p.ValueKind == JsonValueKind.String) projectId = p.GetString();
         }
         catch (JsonException)
         {
@@ -168,7 +173,65 @@ public sealed class MainForm : Form
             case "openUrl":
                 OpenExternal(url);
                 break;
+            case "openProject":
+                _ = OpenProjectAsync(projectId);
+                break;
         }
+    }
+
+    /// <summary>
+    /// The Open button. Only ids of cards currently on screen are accepted, one request per project
+    /// at a time. MT's process is allowed to take the foreground first, or Windows would only flash
+    /// its taskbar button. The outcome goes back to the page as an "openResult" message.
+    /// </summary>
+    private async Task OpenProjectAsync(string? projectId)
+    {
+        if (string.IsNullOrEmpty(projectId)
+            || _lastView is not { MtOnline: true } view
+            || !view.Cards.Any(c => c.Id == projectId)
+            || !_opening.Add(projectId))
+            return;
+
+        MtOpenResult result;
+        try
+        {
+            if (_poller.MtPid is { } pid) NativeMethods.AllowSetForegroundWindow(pid);
+            result = await _poller.OpenProjectAsync(projectId, _closing.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceError($"MT Conductor open failed: {ex}");
+            result = new MtOpenResult(MtOpenKind.Failed, Detail: "Conductor error (see trace log).");
+        }
+        finally
+        {
+            _opening.Remove(projectId);
+        }
+
+        if (!_pageReady) return;
+        var message = new
+        {
+            type = "openResult",
+            projectId,
+            kind = result.Kind.ToString().ToLowerInvariant(),
+            result.PaneTitle,
+            result.Floating,
+            result.OtherPanes,
+            result.Detail,
+        };
+        _webView.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(message, MtJson.Options));
+    }
+
+    private static class NativeMethods
+    {
+        // Lets MT (a different process) bring its own window to the front when it handles Open.
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        internal static extern bool AllowSetForegroundWindow(int processId);
     }
 
     // Links (PRs) open in the default browser, never inside the app.
