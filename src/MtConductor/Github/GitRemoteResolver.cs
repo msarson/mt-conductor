@@ -29,8 +29,9 @@ public sealed class GitRemoteResolver
         if (_cache.TryGetValue(projectPath, out var hit) && hit.ExpiresUtc > DateTime.UtcNow) return hit.Url;
 
         string? url = null;
-        // Local paths only: a UNC or device path from MT would make us contact a remote host.
-        if (IsLocalPath(projectPath) && Directory.Exists(projectPath))
+        // Local paths on fixed drives only: a UNC or device path, or a mapped network drive, from MT
+        // would make us contact a remote host.
+        if (IsLocalPath(projectPath) && IsFixedDrive(projectPath) && Directory.Exists(projectPath))
         {
             try
             {
@@ -54,6 +55,20 @@ public sealed class GitRemoteResolver
 
         _cache[projectPath] = (DateTime.UtcNow + _cacheDuration, url);
         return url;
+    }
+
+    /// <summary>True when the path's drive is a fixed disk (not a mapped network drive, removable or unknown).</summary>
+    internal static bool IsFixedDrive(string path)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(path.Trim());
+            return !string.IsNullOrEmpty(root) && new DriveInfo(root).DriveType == DriveType.Fixed;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     internal static bool IsLocalPath(string path)

@@ -50,4 +50,25 @@ public class GitRemoteResolverTests
     {
         Assert.Equal(expected, GitRemoteResolver.IsLocalPath(path));
     }
+
+    [Fact]
+    public void Only_fixed_drives_count()
+    {
+        Assert.True(GitRemoteResolver.IsFixedDrive(Environment.SystemDirectory));   // the system drive is a fixed disk
+        Assert.False(GitRemoteResolver.IsFixedDrive(@"Q:\no\such\drive") && !Directory.Exists(@"Q:\"));   // not mounted: unknown, not fixed
+        Assert.False(GitRemoteResolver.IsFixedDrive(@"\\server\share\proj"));
+        Assert.False(GitRemoteResolver.IsFixedDrive(""));
+    }
+
+    [Fact]
+    public async Task Git_is_not_run_for_paths_on_drives_that_are_not_fixed()
+    {
+        var calls = 0;
+        var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), (_, _) => { calls++; return Task.FromResult((0, "https://github.com/o/r\n")); });
+
+        // Q: isn't a mounted drive here, so it reports as unknown, never as fixed.
+        if (Directory.Exists(@"Q:\")) return;
+        Assert.Null(await resolver.GetRepoUrlAsync(@"Q:\proj", CancellationToken.None));
+        Assert.Equal(0, calls);
+    }
 }
