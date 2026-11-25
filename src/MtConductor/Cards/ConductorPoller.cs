@@ -40,6 +40,11 @@ public sealed class ConductorPoller
     private IReadOnlyList<MtTask> _lastTasks = [];
     private bool _haveTasks;
 
+    // MT's open-state (which projects have a PM pane open). Only read when MT advertises it; a
+    // failed read reuses the last good answer, so one slow tick doesn't flip labels to a guess.
+    private bool _hasOpenState;
+    private IReadOnlyDictionary<string, int>? _lastOpenState;
+
     // Remote mode as last seen and when it last flipped. MT flips it itself (desk activity,
     // idle timer, phone, presence sensor, its own switch); the API doesn't say which.
     private bool? _lastRemote;
@@ -70,9 +75,8 @@ public sealed class ConductorPoller
         if (health.Has(MtHealth.ProjectOpenCapability)) OpenSupported = true;
         // Only ask for open-state when MT says it has it, so older builds don't log a 404 every tick.
         _hasOpenState = health.Has(MtHealth.ProjectOpenStateCapability);
+        if (!_hasOpenState) _lastOpenState = null;
     }
-
-    private bool _hasOpenState;
 
     /// <summary>
     /// Re-reads MT's pid just before Open, so a just-restarted MT still gets the right to take
@@ -253,7 +257,7 @@ public sealed class ConductorPoller
             gitHubLogin,
             stale,
             othersUnknown,
-            openStateTask.Result);
+            _lastOpenState = openStateTask.Result ?? _lastOpenState);
 
         TrackRemote(remoteTask.Result?.RemoteMode, now);
         return ProjectCardBuilder.Build(snapshot) with

@@ -70,13 +70,27 @@ public sealed class MtApiClient
     /// </summary>
     public async Task<IReadOnlyDictionary<string, int>?> GetOpenStateAsync(CancellationToken ct)
     {
-        var state = await GetAsync<MtOpenState>("api/projects/open-state", ct);
+        // MT answers this on its UI thread, which a modal dialog can hold up: give it a short
+        // limit of its own so it never delays the rest of the poll.
+        MtOpenState? state;
+        try
+        {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limit.CancelAfter(OpenStateTimeout);
+            state = await GetAsync<MtOpenState>("api/projects/open-state", limit.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
         if (state?.Projects is null) return null;
         var open = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in state.Projects)
-            if (!string.IsNullOrEmpty(p.ProjectId) && p.OpenPanes > 0) open[p.ProjectId] = p.OpenPanes;
+            if (p is not null && !string.IsNullOrEmpty(p.ProjectId) && p.OpenPanes > 0) open[p.ProjectId] = p.OpenPanes;
         return open;
     }
+
+    internal static readonly TimeSpan OpenStateTimeout = TimeSpan.FromSeconds(2);
 
     public Task<MtRemoteMode?> GetRemoteModeAsync(CancellationToken ct) =>
         GetAsync<MtRemoteMode>("api/remote-mode", ct);

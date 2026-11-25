@@ -218,6 +218,27 @@ public class MtApiClientTests
     }
 
     [Fact]
+    public async Task Open_state_keeps_only_real_open_projects()
+    {
+        var (client, _) = ClientReturning(HttpStatusCode.OK, """
+            {"projects":[{"projectId":"A","openPanes":2},{"projectId":"b","openPanes":0},{"projectId":"","openPanes":1},null]}
+            """);
+
+        var open = await client.GetOpenStateAsync(CancellationToken.None);
+
+        Assert.NotNull(open);
+        Assert.Equal(2, open!["a"]);   // keys are case-insensitive
+        Assert.Single(open);
+    }
+
+    [Fact]
+    public async Task Open_state_unavailable_is_null()
+    {
+        var (client, _) = ClientReturning(HttpStatusCode.ServiceUnavailable, """{"detail":"not ready"}""");
+        Assert.Null(await client.GetOpenStateAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Open_timeout_is_no_answer_not_offline()
     {
         // HttpClient reports its own timeout as a TaskCanceledException the caller didn't ask for.

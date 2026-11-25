@@ -19,7 +19,7 @@ public sealed record ConductorSnapshot(
     string? GitHubLogin = null,    // gh's logged-in user; PRs by others are counted, not listed
     IReadOnlyList<string>? StaleSources = null,
     IReadOnlySet<string>? PrOthersUnknown = null,   // project ids whose list of others' PRs couldn't be read
-    IReadOnlyDictionary<string, int>? OpenPanes = null);  // MT's open-state: projectId -> PM panes open; null = MT can't say
+    IReadOnlyDictionary<string, int>? OpenPanes = null);  // MT's open-state: projectId -> PM panes open (case-insensitive keys); null = MT can't say
 
 public sealed record PrBadge(int Number, string Title, string Url, string Checks, bool IsDraft, string? Review);
 
@@ -236,7 +236,11 @@ public static class ProjectCardBuilder
         // the best guess that a pane has the project open.
         var openPanes = s.OpenPanes?.GetValueOrDefault(p.Id) ?? 0;
 
-        var openHint = activeAgents.Count > 0
+        var openHint = s.OpenPanes is not null
+            ? (openPanes > 0
+                ? $"Open in MT in {openPanes} pane{(openPanes == 1 ? "" : "s")}."
+                : "Not open in MT.")
+            : activeAgents.Count > 0
             ? $"Probably open: {string.Join(", ", activeAgents)} {(activeAgents.Count == 1 ? "is" : "are")} working on an active task here. MT can't yet say which window."
             : "MT doesn't report which window a project is in yet.";
 

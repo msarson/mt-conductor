@@ -495,6 +495,27 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public async Task Open_state_failure_after_a_good_read_keeps_the_last_answer()
+    {
+        var fail = false;
+        var (poller, _, _) = Create(pq => pq switch
+        {
+            "/api/health" => (HttpStatusCode.OK, """{"service":"multiterminal-rest-api","pid":1,"capabilities":["project-open-state-v1"]}"""),
+            "/api/projects/open-state" => fail
+                ? (HttpStatusCode.ServiceUnavailable, "")
+                : (HttpStatusCode.OK, """{"projects":[]}"""),   // nothing open, although Bob is active
+            _ => HealthyMt(pq),
+        });
+
+        Assert.False((await poller.RefreshAsync(CancellationToken.None)).Cards.Single().OpenInMt);
+
+        fail = true;   // one slow or failed tick
+        var card = (await poller.RefreshAsync(CancellationToken.None)).Cards.Single();
+        Assert.True(card.OpenStateExact);
+        Assert.False(card.OpenInMt);   // not flipped to the guess
+    }
+
+    [Fact]
     public async Task Open_state_failure_falls_back_to_the_guess()
     {
         var (poller, _, _) = Create(pq => pq switch
