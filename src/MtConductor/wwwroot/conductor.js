@@ -59,9 +59,12 @@
       return;
     }
     container.title = prSource(card);
-    const others = card.otherPullRequests > 0 ? ` +${card.otherPullRequests} by others` : "";
+    // When the general list failed, only your own PRs are known: say so rather than imply no others.
+    const others = card.othersKnown === false ? " +? by others"
+      : card.otherPullRequests > 0 ? ` +${card.otherPullRequests} by others` : "";
     if (card.pullRequests.length === 0) {
-      container.textContent = others ? `PRs: none of yours open ·${others}` : "PRs: none open";
+      container.textContent = card.othersKnown === false ? "PRs: none of yours open · others unknown"
+        : others ? `PRs: none of yours open ·${others}` : "PRs: none open";
       return;
     }
     // Without gh's login the list can't be split into yours and others', so say only how many are open.

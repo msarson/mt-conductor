@@ -31,6 +31,7 @@ public sealed class ConductorPoller
     private Dictionary<string, IReadOnlyList<PullRequestInfo>?> _prs = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, string?> _repoUrls = new(StringComparer.OrdinalIgnoreCase);
     private string? _gitHubLogin;
+    private HashSet<string> _prOthersUnknown = new(StringComparer.OrdinalIgnoreCase);   // projects whose general PR list failed
     private bool _prFault;   // the last background PR refresh threw: shown as a warning, last good PRs kept
 
     private IReadOnlyList<MtTask> _lastTasks = [];
@@ -210,9 +211,11 @@ public sealed class ConductorPoller
         Dictionary<string, string?> repoUrls;
         string? gitHubLogin;
         bool prFault;
+        HashSet<string> othersUnknown;
         lock (_prLock)
         {
             prFault = _prFault;
+            othersUnknown = new(_prOthersUnknown, StringComparer.OrdinalIgnoreCase);
             prs = new(_prs, StringComparer.OrdinalIgnoreCase);
             repoUrls = new(_repoUrls, StringComparer.OrdinalIgnoreCase);
             gitHubLogin = _gitHubLogin;
@@ -238,7 +241,8 @@ public sealed class ConductorPoller
             remoteTask.Result?.RemoteMode,
             now,
             gitHubLogin,
-            stale);
+            stale,
+            othersUnknown);
 
         TrackRemote(remoteTask.Result?.RemoteMode, now);
         return ProjectCardBuilder.Build(snapshot) with
@@ -309,25 +313,28 @@ public sealed class ConductorPoller
             var repoUrl = GhPrClient.ParseOwnerRepo(folderUrl) is not null
                 ? folderUrl
                 : string.IsNullOrWhiteSpace(p.GitRepoUrl) ? null : p.GitRepoUrl;
-            if (repoUrl is null) return (p.Id, RepoUrl: (string?)null, Prs: (IReadOnlyList<PullRequestInfo>?)null);
+            if (repoUrl is null) return (p.Id, RepoUrl: (string?)null, Prs: (IReadOnlyList<PullRequestInfo>?)null, OthersUnknown: false);
 
             var general = await _gh.GetOpenPrsAsync(repoUrl, ct);
             // The general list is capped; ask for the Owner's own PRs separately.
             var mine = login is null ? null : await _gh.GetMyOpenPrsAsync(repoUrl, ct);
-            return (p.Id, RepoUrl: repoUrl, Prs: MergePrs(general, mine, login));
+            return (p.Id, RepoUrl: repoUrl, Prs: MergePrs(general, mine, login), OthersUnknown: general is null && mine is not null);
         }));
         lock (_prLock)
         {
             _gitHubLogin = login;
             _prs = results.ToDictionary(r => r.Id, r => r.Prs, StringComparer.OrdinalIgnoreCase);
             _repoUrls = results.ToDictionary(r => r.Id, r => r.RepoUrl, StringComparer.OrdinalIgnoreCase);
+            _prOthersUnknown = results.Where(r => r.OthersUnknown).Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
             _prFault = false;
         }
     }
 
     /// <summary>
     /// Own PRs first, then the others from the capped general list, one entry per PR number.
-    /// Null only when neither list could be read.
+    /// Null only when neither list could be read. When only the own-PRs query worked, the result is just
+    /// the Owner's PRs and the caller must say that others are unknown (see <c>OthersUnknown</c> in the
+    /// refresh), not imply there are none.
     /// </summary>
     internal static IReadOnlyList<PullRequestInfo>? MergePrs(
         IReadOnlyList<PullRequestInfo>? general, IReadOnlyList<PullRequestInfo>? mine, string? login)

@@ -455,4 +455,14 @@ public class ProjectCardBuilderTests
         Assert.Null(unknown.GitHubLogin);
         Assert.Null(none.PrRepo);
     }
+
+    [Fact]
+    public void Cards_know_when_the_others_PR_list_was_unreadable()
+    {
+        var projects = new[] { Project("p", "P", @"C:\p"), Project("q", "Q", @"C:\q") };
+        var cards = ProjectCardBuilder.Build(Snapshot(projects) with { PrOthersUnknown = new HashSet<string> { "p" } }).Cards;
+
+        Assert.False(cards.Single(c => c.Id == "p").OthersKnown);
+        Assert.True(cards.Single(c => c.Id == "q").OthersKnown);
+    }
 }

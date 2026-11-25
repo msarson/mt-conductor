@@ -17,7 +17,8 @@ public sealed record ConductorSnapshot(
     bool? RemoteMode,
     DateTime Now,
     string? GitHubLogin = null,    // gh's logged-in user; PRs by others are counted, not listed
-    IReadOnlyList<string>? StaleSources = null);   // sources that failed this tick (last good data reused)
+    IReadOnlyList<string>? StaleSources = null,
+    IReadOnlySet<string>? PrOthersUnknown = null);   // project ids whose list of others' PRs couldn't be read   // sources that failed this tick (last good data reused)
 
 public sealed record PrBadge(int Number, string Title, string Url, string Checks, bool IsDraft, string? Review);
 
@@ -47,7 +48,8 @@ public sealed record ProjectCard(
     IReadOnlyList<string>? AwaitingTestTitles = null,    // "Title (3 items)" for each task with items ready to test
     IReadOnlyList<string>? ReasonDetails = null,
     string? PrRepo = null,                              // owner/repo the PRs come from (for the PR line's tooltip)
-    string? GitHubLogin = null);                        // gh login "yours" means; null = unknown        // parallel to NeedsYouReasons: hover text, "" when there is none
+    string? GitHubLogin = null,                         // gh login "yours" means; null = unknown
+    bool OthersKnown = true);                           // false: only your PRs could be read, others' are unknown        // parallel to NeedsYouReasons: hover text, "" when there is none
 
 public sealed record ConductorView(
     bool MtOnline,
@@ -261,7 +263,8 @@ public static class ProjectCardBuilder
             AwaitingTestTitles: awaitingTitles,
             ReasonDetails: reasonDetails,
             PrRepo: GhPrClient.ParseOwnerRepo(p.GitRepoUrl),
-            GitHubLogin: s.GitHubLogin);
+            GitHubLogin: s.GitHubLogin,
+            OthersKnown: s.PrOthersUnknown?.Contains(p.Id) != true);
     }
 
     /// <summary>

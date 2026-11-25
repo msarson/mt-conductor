@@ -206,6 +206,25 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public async Task When_only_the_own_PR_query_works_others_are_marked_unknown()
+    {
+        var mt = new FakeMt(HealthyMt);
+        var gh = new GhPrClient(TimeSpan.Zero, (_, mine, _) => Task.FromResult(mine ? (0, $"[{MyPr}]") : (1, "")),
+            runGhArgs: (_, _) => Task.FromResult((0, "msarson\n")));
+        var poller = new ConductorPoller(
+            new MtApiClient(new HttpClient(mt) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) }),
+            gh, new GitRemoteResolver(TimeSpan.FromMinutes(10), (_, _) => Task.FromResult((128, ""))), () => Now);
+
+        await poller.RefreshAsync(CancellationToken.None);
+        await poller.WaitForPrRefreshAsync();
+        var card = (await poller.RefreshAsync(CancellationToken.None)).Cards.Single();
+
+        Assert.Equal([82], card.PullRequests!.Select(p => p.Number));
+        Assert.False(card.OthersKnown);
+        Assert.Equal(0, card.OtherPullRequests);
+    }
+
+    [Fact]
     public async Task Missing_gh_shows_as_a_warning()
     {
         var mt = new FakeMt(HealthyMt);
