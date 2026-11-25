@@ -67,6 +67,31 @@ public static class ProjectCardBuilder
     /// </summary>
     public static readonly TimeSpan QuestionMaxAge = TimeSpan.FromHours(24);
 
+    private const string ConductorErrorPrefix = "conductor error:";
+    private const string StaleViewWarning = "showing last good view";
+
+    /// <summary>
+    /// What to show when the refresh itself threw (our bug, not MT being down). After an online view
+    /// the cards stay but are labelled as the last good ones, with their old UpdatedAt so they don't
+    /// pretend to be fresh. After an offline view (or none) the page stays offline plus the error,
+    /// rather than showing an empty online view.
+    /// </summary>
+    public static ConductorView RefreshFailed(ConductorView? last, string errorText, DateTime now)
+    {
+        // Replace earlier errors so repeated failures don't pile up.
+        var warnings = (last?.Warnings ?? [])
+            .Where(w => !w.StartsWith(ConductorErrorPrefix, StringComparison.Ordinal) && w != StaleViewWarning)
+            .ToList();
+        warnings.Add($"{ConductorErrorPrefix} {errorText}");
+
+        if (last is { MtOnline: true })
+        {
+            warnings.Add(StaleViewWarning);
+            return last with { Warnings = warnings };
+        }
+        return (last ?? new ConductorView(false, now, null, [], 0)) with { Warnings = warnings };
+    }
+
     public static ConductorView Build(ConductorSnapshot s)
     {
         if (!s.MtOnline)

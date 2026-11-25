@@ -106,11 +106,7 @@ public sealed class MainForm : Form
                 // Never let one bad refresh stop polling. This is our fault, not MT being down:
                 // keep the last cards and say so, rather than claiming "MT offline".
                 System.Diagnostics.Trace.TraceError($"MT Conductor refresh failed: {ex}");
-                var warning = $"conductor error: {ex.GetType().Name} (see trace log)";
-                view = _lastView is { MtOnline: true } last
-                    // Replace any earlier conductor error so repeated failures don't pile up.
-                    ? last with { Warnings = [.. (last.Warnings ?? []).Where(w => !w.StartsWith("conductor error:", StringComparison.Ordinal)), warning] }
-                    : new ConductorView(true, DateTime.Now, null, [], 0, [warning]);
+                view = ProjectCardBuilder.RefreshFailed(_lastView, $"{ex.GetType().Name} (see trace log)", DateTime.Now);
             }
 
             _lastView = view;

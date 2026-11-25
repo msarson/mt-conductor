@@ -253,7 +253,7 @@
     offlineEl.hidden = view.mtOnline;
     cardsEl.classList.toggle("stale", !view.mtOnline);
     statusEl.className = `pill ${view.mtOnline ? "online" : "offline"}`;
-    const warnings = (view.mtOnline && view.warnings) ? view.warnings : [];
+    const warnings = view.warnings || [];   // also while offline: a conductor error is ours, not MT's
     statusEl.textContent = view.mtOnline ? `MT online · updated ${timeText(view.updatedAt)}` : "MT offline";
     if (warnings.length > 0) {
       statusEl.className = "pill offline";

@@ -375,4 +375,33 @@ public class ProjectCardBuilderTests
     {
         Assert.Equal(expected, ProjectCardBuilder.RelativeAge(Now.AddMinutes(-minutesAgo), Now));
     }
+
+    [Fact]
+    public void Refresh_error_after_an_online_view_keeps_the_cards_labelled_as_the_last_good_view()
+    {
+        var earlier = Now.AddMinutes(-5);
+        var online = new ConductorView(true, earlier, false, [ProjectCardBuilder.Build(Snapshot([Project("a", "Alpha", @"C:\a")])).Cards[0]], 0, ["inbox unavailable"]);
+
+        var first = ProjectCardBuilder.RefreshFailed(online, "IOException (see trace log)", Now);
+        var again = ProjectCardBuilder.RefreshFailed(first, "TimeoutException (see trace log)", Now);
+
+        Assert.True(again.MtOnline);
+        Assert.Single(again.Cards);
+        Assert.Equal(earlier, again.UpdatedAt);   // doesn't pretend to be fresh
+        Assert.Equal(["inbox unavailable", "conductor error: TimeoutException (see trace log)", "showing last good view"], again.Warnings);
+    }
+
+    [Fact]
+    public void Refresh_error_after_an_offline_or_no_view_stays_offline_with_the_error()
+    {
+        var none = ProjectCardBuilder.RefreshFailed(null, "IOException (see trace log)", Now);
+        Assert.False(none.MtOnline);
+        Assert.Empty(none.Cards);
+        Assert.Equal(["conductor error: IOException (see trace log)"], none.Warnings);
+
+        var offline = new ConductorView(false, Now.AddMinutes(-1), null, [], 0);
+        var after = ProjectCardBuilder.RefreshFailed(offline, "IOException (see trace log)", Now);
+        Assert.False(after.MtOnline);
+        Assert.Equal(["conductor error: IOException (see trace log)"], after.Warnings);
+    }
 }
