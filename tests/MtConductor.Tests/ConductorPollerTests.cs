@@ -289,6 +289,48 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public async Task Capability_turns_Open_on_but_its_absence_proves_nothing()
+    {
+        var caps = """["ca-embedded-v1","project-open-v1"]""";
+        var pid = 1;
+        var (poller, _, _) = Create(pq => pq == "/api/health"
+            ? (HttpStatusCode.OK, $$"""{"service":"multiterminal-rest-api","pid":{{pid}},"capabilities":{{caps}}}""")
+            : HealthyMt(pq));
+
+        Assert.True((await poller.RefreshAsync(CancellationToken.None)).OpenSupported);   // no click needed
+
+        // A restart onto a build of #103 from before the flag: unknown again, so Open is still tried.
+        pid = 2;
+        caps = """["ca-embedded-v1"]""";
+        Assert.Null((await poller.RefreshAsync(CancellationToken.None)).OpenSupported);
+    }
+
+    [Fact]
+    public async Task Pid_is_refreshed_just_before_open()
+    {
+        var pid = 1;
+        var (poller, _, _) = Create(pq => pq == "/api/health"
+            ? (HttpStatusCode.OK, $$"""{"service":"multiterminal-rest-api","pid":{{pid}}}""")
+            : HealthyMt(pq));
+        await poller.RefreshAsync(CancellationToken.None);
+
+        pid = 7;   // MT restarted since the last poll
+        Assert.Equal(7, await poller.RefreshMtPidAsync(CancellationToken.None));
+        Assert.Equal(7, poller.MtPid);
+    }
+
+    [Fact]
+    public async Task Pid_refresh_keeps_the_last_pid_when_MT_does_not_answer()
+    {
+        var up = true;
+        var (poller, _, _) = Create(pq => up || pq != "/api/health" ? HealthyMt(pq) : null);
+        await poller.RefreshAsync(CancellationToken.None);
+
+        up = false;
+        Assert.Equal(1, await poller.RefreshMtPidAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Offline_open_does_not_change_what_we_know_about_support()
     {
         var (poller, _, _) = Create(pq => pq == "/api/projects/mt/open" ? null : HealthyMt(pq)); // null = connection refused

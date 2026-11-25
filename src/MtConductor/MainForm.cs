@@ -204,7 +204,7 @@ public sealed class MainForm : Form
         MtOpenResult result;
         try
         {
-            AllowMtToTakeForeground();
+            AllowMtToTakeForeground(await _poller.RefreshMtPidAsync(_closing.Token));
             result = await _poller.OpenProjectAsync(projectId, _closing.Token);
         }
         catch (OperationCanceledException)
@@ -229,9 +229,9 @@ public sealed class MainForm : Form
     /// unauthenticated local health check, so it is only granted if that process really is
     /// MultiTerminal (read-only lookup; never starts or stops anything).
     /// </summary>
-    private void AllowMtToTakeForeground()
+    private static void AllowMtToTakeForeground(int? mtPid)
     {
-        if (_poller.MtPid is not { } pid) return;
+        if (mtPid is not { } pid) return;
         try
         {
             using var process = System.Diagnostics.Process.GetProcessById(pid);

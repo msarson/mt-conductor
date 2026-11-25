@@ -6,7 +6,15 @@ namespace MtConductor.Api;
 // DTOs for the MultiTerminal REST API (http://localhost:5050). Only the fields MT Conductor uses.
 // MT serializes C# properties as camelCase; a few routes use explicit snake_case names.
 
-public sealed record MtHealth(string? Service, string? App, string? Version, int Pid, DateTime? StartedUtc);
+public sealed record MtHealth(string? Service, string? App, string? Version, int Pid, DateTime? StartedUtc,
+    List<string>? Capabilities = null)
+{
+    /// <summary>Listed by MT builds that have POST /api/projects/{id}/open (ClarionLive/multiterminal#103).</summary>
+    public const string ProjectOpenCapability = "project-open-v1";
+
+    public bool Has(string capability) =>
+        Capabilities?.Contains(capability, StringComparer.OrdinalIgnoreCase) == true;
+}
 
 public sealed record MtProjectList(int Count, List<MtProject> Projects);
 

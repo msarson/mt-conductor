@@ -49,6 +49,33 @@ public sealed class ConductorPoller
     /// </summary>
     public bool? OpenSupported { get; private set; }
 
+    /// <summary>
+    /// Takes MT's pid and Open capability from a health answer. A restarted MT (new pid) may be a
+    /// different build, so what we learnt about Open is forgotten. The "project-open-v1"
+    /// capability turns Open on; its absence proves nothing, because builds of #103 from before
+    /// the flag have the endpoint without it, so those still fall back to trying.
+    /// </summary>
+    private void ApplyHealth(MtHealth health)
+    {
+        if (health.Pid > 0 && health.Pid != MtPid)
+        {
+            MtPid = health.Pid;
+            OpenSupported = null;
+        }
+        if (health.Has(MtHealth.ProjectOpenCapability)) OpenSupported = true;
+    }
+
+    /// <summary>
+    /// Re-reads MT's pid just before Open, so a just-restarted MT still gets the right to take
+    /// the foreground. Returns the pid, or the last known one if the health check fails.
+    /// </summary>
+    public async Task<int?> RefreshMtPidAsync(CancellationToken ct)
+    {
+        var health = await _mt.GetHealthAsync(ct);
+        if (health is not null) ApplyHealth(health);
+        return MtPid;
+    }
+
     /// <summary>The Open button: asks MT to focus or launch the project, and learns whether MT supports it.</summary>
     public async Task<MtOpenResult> OpenProjectAsync(string projectId, CancellationToken ct)
     {
@@ -108,11 +135,7 @@ public sealed class ConductorPoller
         if (health is null)
             return ProjectCardBuilder.Build(Offline(now));
 
-        if (health.Pid > 0 && health.Pid != MtPid)
-        {
-            MtPid = health.Pid;
-            OpenSupported = null;   // a restarted MT may be a different build
-        }
+        ApplyHealth(health);
 
         if (now - _profileFetchedAt > OwnerProfileRefresh)
         {
