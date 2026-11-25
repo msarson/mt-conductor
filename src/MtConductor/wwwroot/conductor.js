@@ -44,7 +44,8 @@
       container.textContent = others ? `PRs: none of yours open ·${others}` : "PRs: none open";
       return;
     }
-    container.append("PRs: ");
+    // Without gh's login the list can't be split into yours and others', so say only how many are open.
+    container.append(card.prOwnerKnown === false ? `PRs: ${card.pullRequests.length} open · ` : "PRs: ");
     for (const pr of card.pullRequests) {
       const a = document.createElement("a");
       a.href = pr.url;

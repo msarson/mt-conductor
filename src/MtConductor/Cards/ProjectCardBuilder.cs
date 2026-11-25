@@ -39,7 +39,8 @@ public sealed record ProjectCard(
     int OtherPullRequests,                  // open PRs by other people in the same repo
     bool HasGitHubRepo,
     IReadOnlyList<string> ActiveAgents,     // connected agents whose active task is in this project
-    string OpenHint);
+    string OpenHint,
+    bool PrOwnerKnown = true);              // false: gh's login is unknown, so PRs aren't split into yours and others'
 
 public sealed record ConductorView(
     bool MtOnline,
@@ -172,7 +173,8 @@ public static class ProjectCardBuilder
         var otherPrs = 0;
         if (s.PullRequests.TryGetValue(p.Id, out var prList) && prList is not null)
         {
-            // Without a known login, or for PRs with no author, treat them as yours.
+            // Without a known login nobody can be called "you": list them all, neutrally.
+            // PRs with no author are treated as yours.
             bool IsMine(PullRequestInfo pr) =>
                 s.GitHubLogin is null || pr.Author is null
                 || string.Equals(pr.Author, s.GitHubLogin, StringComparison.OrdinalIgnoreCase);
@@ -205,7 +207,8 @@ public static class ProjectCardBuilder
             otherPrs,
             HasGitHubRepo: !string.IsNullOrWhiteSpace(p.GitRepoUrl),
             activeAgents,
-            openHint);
+            openHint,
+            PrOwnerKnown: s.GitHubLogin is not null);
     }
 
     /// <summary>

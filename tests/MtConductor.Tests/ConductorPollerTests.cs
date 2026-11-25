@@ -20,19 +20,22 @@ public class ConductorPollerTests
         };
     });
 
+    private const string MyPr = """{"number":82,"title":"t","url":"https://github.com/o/r/pull/82","isDraft":false,"statusCheckRollup":[],"reviewDecision":"","author":{"login":"msarson"}}""";
+    private const string OtherPr = """{"number":88,"title":"x","url":"https://github.com/o/r/pull/88","isDraft":false,"statusCheckRollup":[],"reviewDecision":"","author":{"login":"someone"}}""";
+
+    /// <param name="generalPrs">What the capped general list returns (JSON array body).</param>
+    /// <param name="login">gh's logged-in user; null = gh can't say.</param>
     private static (ConductorPoller Poller, FakeMt Mt, List<string> GhCalls) Create(
-        Func<string, (HttpStatusCode, string)?> route, string? originUrl = null)
+        Func<string, (HttpStatusCode, string)?> route, string? originUrl = null,
+        string? generalPrs = null, string? login = "msarson")
     {
         var mt = new FakeMt(route);
         var ghCalls = new List<string>();
-        var gh = new GhPrClient(TimeSpan.FromMinutes(2), (repo, _) =>
+        var gh = new GhPrClient(TimeSpan.FromMinutes(2), (repo, mine, _) =>
         {
             lock (ghCalls) ghCalls.Add(repo);
-            return Task.FromResult((0, """
-                [{"number":82,"title":"t","url":"https://github.com/o/r/pull/82","isDraft":false,"statusCheckRollup":[],"reviewDecision":"","author":{"login":"msarson"}},
-                 {"number":88,"title":"x","url":"https://github.com/o/r/pull/88","isDraft":false,"statusCheckRollup":[],"reviewDecision":"","author":{"login":"someone"}}]
-                """));
-        }, runGhArgs: (_, _) => Task.FromResult((0, "msarson\n")));
+            return Task.FromResult((0, mine ? $"[{MyPr}]" : generalPrs ?? $"[{MyPr},{OtherPr}]"));
+        }, runGhArgs: (_, _) => Task.FromResult(login is null ? (1, "") : (0, login + "\n")));
         var client = new MtApiClient(new HttpClient(mt) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) });
         var git = new GitRemoteResolver(TimeSpan.FromMinutes(10),
             (_, _) => Task.FromResult(originUrl is null ? (128, "") : (0, originUrl + "\n")));
@@ -125,6 +128,74 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public async Task Folder_remote_wins_over_MT_repo_url_so_forks_show_upstream_PRs()
+    {
+        var folder = Path.GetTempPath().TrimEnd('\\').Replace("\\", "\\\\");
+        (HttpStatusCode, string)? Route(string pq) => pq == "/api/projects"
+            ? (HttpStatusCode.OK, $$"""{"count":1,"projects":[{"id":"x","name":"X","path":"{{folder}}","status":"Active","gitRepoUrl":"https://github.com/me/fork"}]}""")
+            : HealthyMt(pq);
+        var (poller, _, ghCalls) = Create(Route, originUrl: "https://github.com/up/stream.git");
+
+        await poller.RefreshAsync(CancellationToken.None);
+        await poller.WaitForPrRefreshAsync();
+        await poller.RefreshAsync(CancellationToken.None);
+
+        Assert.Equal(["up/stream"], ghCalls.Distinct());
+    }
+
+    [Fact]
+    public async Task MT_repo_url_is_used_when_the_folder_has_no_usable_remote()
+    {
+        var (poller, _, ghCalls) = Create(HealthyMt);   // git answers 128 (no remote)
+
+        await poller.RefreshAsync(CancellationToken.None);
+        await poller.WaitForPrRefreshAsync();
+
+        Assert.Equal(["o/r"], ghCalls.Distinct());
+    }
+
+    [Fact]
+    public async Task Own_PRs_come_from_the_author_query_even_when_the_capped_list_misses_them()
+    {
+        var (poller, _, _) = Create(HealthyMt, generalPrs: $"[{OtherPr}]");   // PR 82 fell off the 30-item list
+
+        await poller.RefreshAsync(CancellationToken.None);
+        await poller.WaitForPrRefreshAsync();
+        var card = (await poller.RefreshAsync(CancellationToken.None)).Cards.Single();
+
+        Assert.Equal([82], card.PullRequests!.Select(p => p.Number));
+        Assert.Equal(1, card.OtherPullRequests);
+        Assert.True(card.PrOwnerKnown);
+    }
+
+    [Fact]
+    public async Task Unknown_gh_login_lists_PRs_neutrally()
+    {
+        var (poller, _, _) = Create(HealthyMt, login: null);
+
+        await poller.RefreshAsync(CancellationToken.None);
+        await poller.WaitForPrRefreshAsync();
+        var card = (await poller.RefreshAsync(CancellationToken.None)).Cards.Single();
+
+        Assert.False(card.PrOwnerKnown);
+        Assert.Equal(2, card.PullRequests!.Count);
+        Assert.Equal(0, card.OtherPullRequests);
+    }
+
+    [Fact]
+    public void MergePrs_keeps_one_entry_per_number_and_null_only_when_both_failed()
+    {
+        PullRequestInfo Pr(int n, string? author) => new(n, "t", "u", false, "none", null, author);
+
+        var merged = ConductorPoller.MergePrs([Pr(2, "x"), Pr(1, "me")], [Pr(1, null)], "me")!;
+
+        Assert.Equal([1, 2], merged.Select(p => p.Number));
+        Assert.Equal("me", merged[0].Author);
+        Assert.Equal([1], ConductorPoller.MergePrs(null, [Pr(1, "me")], "me")!.Select(p => p.Number));
+        Assert.Null(ConductorPoller.MergePrs(null, null, "me"));
+    }
+
+    [Fact]
     public void Merge_removes_duplicate_ids_keeping_the_latest_and_converts_utc()
     {
         var utc = new DateTime(2026, 7, 1, 12, 0, 0, DateTimeKind.Unspecified); // as MT sends it
@@ -189,7 +260,7 @@ public class ConductorPollerTests
             : HealthyMt(pq));
         var poller = new ConductorPoller(
             new MtApiClient(new HttpClient(mt) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) }),
-            new GhPrClient(TimeSpan.FromMinutes(2), (_, _) => Task.FromResult((1, "")), (_, _) => Task.FromResult((1, ""))),
+            new GhPrClient(TimeSpan.FromMinutes(2), (_, _, _) => Task.FromResult((1, "")), (_, _) => Task.FromResult((1, ""))),
             new GitRemoteResolver(TimeSpan.FromMinutes(10), (_, _) => Task.FromResult((128, ""))),
             () => clock);
 

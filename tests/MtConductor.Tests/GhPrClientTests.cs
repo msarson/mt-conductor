@@ -123,7 +123,7 @@ public class GhPrClientTests
     public async Task GetOpenPrsAsync_caches_per_repo()
     {
         var calls = new List<string>();
-        var client = new GhPrClient(TimeSpan.FromMinutes(5), (repo, _) =>
+        var client = new GhPrClient(TimeSpan.FromMinutes(5), (repo, _, _) =>
         {
             lock (calls) calls.Add(repo);
             return Task.FromResult((0, SampleJson));
@@ -143,7 +143,7 @@ public class GhPrClientTests
     public async Task GetOpenPrsAsync_refetches_after_cache_expires()
     {
         var count = 0;
-        var client = new GhPrClient(TimeSpan.Zero, (_, _) =>
+        var client = new GhPrClient(TimeSpan.Zero, (_, _, _) =>
         {
             Interlocked.Increment(ref count);
             return Task.FromResult((0, "[]"));
@@ -159,7 +159,7 @@ public class GhPrClientTests
     public async Task GetOpenPrsAsync_returns_null_on_nonzero_exit_and_caches_it()
     {
         var count = 0;
-        var client = new GhPrClient(TimeSpan.FromMinutes(5), (_, _) =>
+        var client = new GhPrClient(TimeSpan.FromMinutes(5), (_, _, _) =>
         {
             Interlocked.Increment(ref count);
             return Task.FromResult((1, ""));
@@ -174,7 +174,7 @@ public class GhPrClientTests
     public async Task GetOpenPrsAsync_returns_null_when_gh_missing()
     {
         var client = new GhPrClient(TimeSpan.FromMinutes(5),
-            (_, _) => throw new System.ComponentModel.Win32Exception(2, "The system cannot find the file specified"));
+            (_, _, _) => throw new System.ComponentModel.Win32Exception(2, "The system cannot find the file specified"));
 
         Assert.Null(await client.GetOpenPrsAsync("o/r", CancellationToken.None));
     }
@@ -182,7 +182,7 @@ public class GhPrClientTests
     [Fact]
     public async Task GetOpenPrsAsync_returns_null_on_bad_json()
     {
-        var client = new GhPrClient(TimeSpan.FromMinutes(5), (_, _) => Task.FromResult((0, "not json")));
+        var client = new GhPrClient(TimeSpan.FromMinutes(5), (_, _, _) => Task.FromResult((0, "not json")));
 
         Assert.Null(await client.GetOpenPrsAsync("o/r", CancellationToken.None));
     }
@@ -191,7 +191,7 @@ public class GhPrClientTests
     public async Task GetOpenPrsAsync_returns_null_for_bad_url_without_calling_gh()
     {
         var count = 0;
-        var client = new GhPrClient(TimeSpan.FromMinutes(5), (_, _) =>
+        var client = new GhPrClient(TimeSpan.FromMinutes(5), (_, _, _) =>
         {
             Interlocked.Increment(ref count);
             return Task.FromResult((0, "[]"));
@@ -206,7 +206,7 @@ public class GhPrClientTests
     public async Task GetOpenPrsAsync_propagates_caller_cancellation_and_does_not_cache()
     {
         var count = 0;
-        var client = new GhPrClient(TimeSpan.FromMinutes(5), (_, ct) =>
+        var client = new GhPrClient(TimeSpan.FromMinutes(5), (_, _, ct) =>
         {
             Interlocked.Increment(ref count);
             ct.ThrowIfCancellationRequested();

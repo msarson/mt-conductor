@@ -20,17 +20,17 @@ public sealed class GhPrClient
     private static readonly TimeSpan GhTimeout = TimeSpan.FromSeconds(15);
 
     private readonly TimeSpan _cacheDuration;
-    private readonly Func<string, CancellationToken, Task<(int ExitCode, string StdOut)>> _runGh;
+    private readonly Func<string, bool, CancellationToken, Task<(int ExitCode, string StdOut)>> _runGh;
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     private sealed record CacheEntry(DateTime ExpiresUtc, IReadOnlyList<PullRequestInfo>? Prs);
 
     /// <param name="cacheDuration">How long a result (or a failure) is reused per repo.</param>
-    /// <param name="runGh">Runs gh for an owner/repo and returns its exit code and stdout. Tests pass a fake.</param>
+    /// <param name="runGh">Runs gh for an owner/repo (only the caller's own PRs when the bool is true) and returns its exit code and stdout. Tests pass a fake.</param>
     /// <param name="runGhArgs">Runs gh with arbitrary args (used for the viewer login). Tests pass a fake.</param>
     public GhPrClient(
         TimeSpan cacheDuration,
-        Func<string, CancellationToken, Task<(int ExitCode, string StdOut)>>? runGh = null,
+        Func<string, bool, CancellationToken, Task<(int ExitCode, string StdOut)>>? runGh = null,
         Func<string[], CancellationToken, Task<(int ExitCode, string StdOut)>>? runGhArgs = null)
     {
         _cacheDuration = cacheDuration;
@@ -41,19 +41,30 @@ public sealed class GhPrClient
     private readonly Func<string[], CancellationToken, Task<(int ExitCode, string StdOut)>> _runGhArgs;
 
     /// <summary>Returns open PRs for the repo, or null when unknown (gh missing, not logged in, timeout, bad repo URL).</summary>
-    public async Task<IReadOnlyList<PullRequestInfo>?> GetOpenPrsAsync(string? gitRepoUrl, CancellationToken ct)
+    public Task<IReadOnlyList<PullRequestInfo>?> GetOpenPrsAsync(string? gitRepoUrl, CancellationToken ct) =>
+        GetPrsAsync(gitRepoUrl, mine: false, ct);
+
+    /// <summary>
+    /// The logged-in user's own open PRs (<c>--author @me</c>). Asked separately because the general
+    /// list is capped, so on a busy repo it can leave the Owner's PRs out.
+    /// </summary>
+    public Task<IReadOnlyList<PullRequestInfo>?> GetMyOpenPrsAsync(string? gitRepoUrl, CancellationToken ct) =>
+        GetPrsAsync(gitRepoUrl, mine: true, ct);
+
+    private async Task<IReadOnlyList<PullRequestInfo>?> GetPrsAsync(string? gitRepoUrl, bool mine, CancellationToken ct)
     {
         var ownerRepo = ParseOwnerRepo(gitRepoUrl);
         if (ownerRepo is null)
             return null;
 
-        if (_cache.TryGetValue(ownerRepo, out var cached) && cached.ExpiresUtc > DateTime.UtcNow)
+        var key = mine ? ownerRepo + "|@me" : ownerRepo;
+        if (_cache.TryGetValue(key, out var cached) && cached.ExpiresUtc > DateTime.UtcNow)
             return cached.Prs;
 
         IReadOnlyList<PullRequestInfo>? result;
         try
         {
-            var (exitCode, stdout) = await _runGh(ownerRepo, ct).ConfigureAwait(false);
+            var (exitCode, stdout) = await _runGh(ownerRepo, mine, ct).ConfigureAwait(false);
             result = exitCode == 0 ? ParsePrJson(stdout) : null;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -66,7 +77,7 @@ public sealed class GhPrClient
             result = null; // gh missing, bad output, or timed out
         }
 
-        _cache[ownerRepo] = new CacheEntry(DateTime.UtcNow + _cacheDuration, result);
+        _cache[key] = new CacheEntry(DateTime.UtcNow + _cacheDuration, result);
         return result;
     }
 
@@ -236,12 +247,13 @@ public sealed class GhPrClient
         return login;
     }
 
-    private static Task<(int ExitCode, string StdOut)> RunGhAsync(string ownerRepo, CancellationToken ct) =>
-        RunGhArgsAsync(
-        [
-            "pr", "list", "--repo", ownerRepo, "--state", "open", "--limit", "30",
-            "--json", "number,title,url,isDraft,statusCheckRollup,reviewDecision,author",
-        ], ct);
+    private static Task<(int ExitCode, string StdOut)> RunGhAsync(string ownerRepo, bool mine, CancellationToken ct)
+    {
+        List<string> args = ["pr", "list", "--repo", ownerRepo, "--state", "open", "--limit", "30"];
+        if (mine) args.AddRange(["--author", "@me"]);
+        args.AddRange(["--json", "number,title,url,isDraft,statusCheckRollup,reviewDecision,author"]);
+        return RunGhArgsAsync([.. args], ct);
+    }
 
     /// <summary>Default runner: launches gh directly (no shell). Returns (-1, "") on timeout.</summary>
     private static Task<(int ExitCode, string StdOut)> RunGhArgsAsync(string[] args, CancellationToken ct) =>

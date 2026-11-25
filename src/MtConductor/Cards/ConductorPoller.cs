@@ -203,9 +203,7 @@ public sealed class ConductorPoller
 
         // Fill in repos found from the project folders so cards know a repo exists.
         var withRepos = projects
-            .Select(p => string.IsNullOrWhiteSpace(p.GitRepoUrl) && repoUrls.GetValueOrDefault(p.Id) is { } url
-                ? p with { GitRepoUrl = url }
-                : p)
+            .Select(p => repoUrls.GetValueOrDefault(p.Id) is { } url ? p with { GitRepoUrl = url } : p)
             .ToList();
 
         var snapshot = new ConductorSnapshot(
@@ -257,16 +255,22 @@ public sealed class ConductorPoller
             var snapshot = projects.ToList();
             _prRefresh = Task.Run(async () =>
             {
+                var login = await _gh.GetViewerLoginAsync(ct);
                 var results = await Task.WhenAll(snapshot.Select(async p =>
                 {
-                    // MT's gitRepoUrl first; otherwise the project folder's own origin remote.
-                    var repoUrl = !string.IsNullOrWhiteSpace(p.GitRepoUrl)
-                        ? p.GitRepoUrl
-                        : await _git.GetRepoUrlAsync(p.SourcePath ?? p.Path, ct);
-                    var prs = repoUrl is null ? null : await _gh.GetOpenPrsAsync(repoUrl, ct);
-                    return (p.Id, RepoUrl: repoUrl, Prs: prs);
+                    // The folder's own upstream (else origin) remote first: on a fork it points at
+                    // the repo the PRs go to, which MT's gitRepoUrl may not. MT's URL is the fallback.
+                    var folderUrl = await _git.GetRepoUrlAsync(p.SourcePath ?? p.Path, ct);
+                    var repoUrl = GhPrClient.ParseOwnerRepo(folderUrl) is not null
+                        ? folderUrl
+                        : string.IsNullOrWhiteSpace(p.GitRepoUrl) ? null : p.GitRepoUrl;
+                    if (repoUrl is null) return (p.Id, RepoUrl: (string?)null, Prs: (IReadOnlyList<PullRequestInfo>?)null);
+
+                    var general = await _gh.GetOpenPrsAsync(repoUrl, ct);
+                    // The general list is capped; ask for the Owner's own PRs separately.
+                    var mine = login is null ? null : await _gh.GetMyOpenPrsAsync(repoUrl, ct);
+                    return (p.Id, RepoUrl: repoUrl, Prs: MergePrs(general, mine, login));
                 }));
-                var login = await _gh.GetViewerLoginAsync(ct);
                 lock (_prLock)
                 {
                     _gitHubLogin = login;
@@ -275,6 +279,23 @@ public sealed class ConductorPoller
                 }
             }, ct);
         }
+    }
+
+    /// <summary>
+    /// Own PRs first, then the others from the capped general list, one entry per PR number.
+    /// Null only when neither list could be read.
+    /// </summary>
+    internal static IReadOnlyList<PullRequestInfo>? MergePrs(
+        IReadOnlyList<PullRequestInfo>? general, IReadOnlyList<PullRequestInfo>? mine, string? login)
+    {
+        if (general is null && mine is null) return null;
+        var merged = new List<PullRequestInfo>();
+        var seen = new HashSet<int>();
+        foreach (var pr in mine ?? [])
+            if (seen.Add(pr.Number)) merged.Add(pr.Author is null ? pr with { Author = login } : pr);
+        foreach (var pr in general ?? [])
+            if (seen.Add(pr.Number)) merged.Add(pr);
+        return merged;
     }
 
     private static ConductorSnapshot Offline(DateTime now) =>
