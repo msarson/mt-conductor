@@ -15,7 +15,9 @@ internal static class ProcessRunner
     public static async Task<(int ExitCode, string StdOut)> RunAsync(
         string tool, IEnumerable<string> args, TimeSpan timeout, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo(tool)
+        // Absolute path from PATH only; a missing tool reads as "not installed", like before.
+        var exe = ToolPath.Find(tool) ?? throw new Win32Exception($"{tool}.exe was not found on PATH.");
+        var psi = new ProcessStartInfo(exe)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
