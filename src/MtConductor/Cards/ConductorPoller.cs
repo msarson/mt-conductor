@@ -32,6 +32,9 @@ public sealed class ConductorPoller
     private Dictionary<string, string?> _repoUrls = new(StringComparer.OrdinalIgnoreCase);
     private string? _gitHubLogin;
     private HashSet<string> _prOthersUnknown = new(StringComparer.OrdinalIgnoreCase);   // projects whose general PR list failed
+    // At most this many projects at once run git/gh, so a long project list doesn't start dozens of processes.
+    internal const int MaxConcurrentPrLookups = 4;
+    private readonly SemaphoreSlim _prGate = new(MaxConcurrentPrLookups);
     private bool _prFault;   // the last background PR refresh threw: shown as a warning, last good PRs kept
 
     private IReadOnlyList<MtTask> _lastTasks = [];
@@ -305,7 +308,21 @@ public sealed class ConductorPoller
     private async Task RefreshPrsAsync(List<MtProject> snapshot, CancellationToken ct)
     {
         var login = await _gh.GetViewerLoginAsync(ct);
-        var results = await Task.WhenAll(snapshot.Select(async p =>
+        var results = await Task.WhenAll(snapshot.Select(p => LookUpPrsAsync(p, login, ct)));        lock (_prLock)
+        {
+            _gitHubLogin = login;
+            _prs = results.ToDictionary(r => r.Id, r => r.Prs, StringComparer.OrdinalIgnoreCase);
+            _repoUrls = results.ToDictionary(r => r.Id, r => r.RepoUrl, StringComparer.OrdinalIgnoreCase);
+            _prOthersUnknown = results.Where(r => r.OthersUnknown).Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _prFault = false;
+        }
+    }
+
+    private async Task<(string Id, string? RepoUrl, IReadOnlyList<PullRequestInfo>? Prs, bool OthersUnknown)> LookUpPrsAsync(
+        MtProject p, string? login, CancellationToken ct)
+    {
+        await _prGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
             // The folder's own upstream (else origin) remote first: on a fork it points at
             // the repo the PRs go to, which MT's gitRepoUrl may not. MT's URL is the fallback.
@@ -313,20 +330,16 @@ public sealed class ConductorPoller
             var repoUrl = GhPrClient.ParseOwnerRepo(folderUrl) is not null
                 ? folderUrl
                 : string.IsNullOrWhiteSpace(p.GitRepoUrl) ? null : p.GitRepoUrl;
-            if (repoUrl is null) return (p.Id, RepoUrl: (string?)null, Prs: (IReadOnlyList<PullRequestInfo>?)null, OthersUnknown: false);
+            if (repoUrl is null) return (p.Id, null, null, false);
 
             var general = await _gh.GetOpenPrsAsync(repoUrl, ct);
             // The general list is capped; ask for the Owner's own PRs separately.
             var mine = login is null ? null : await _gh.GetMyOpenPrsAsync(repoUrl, ct);
-            return (p.Id, RepoUrl: repoUrl, Prs: MergePrs(general, mine, login), OthersUnknown: general is null && mine is not null);
-        }));
-        lock (_prLock)
+            return (p.Id, repoUrl, MergePrs(general, mine, login), general is null && mine is not null);
+        }
+        finally
         {
-            _gitHubLogin = login;
-            _prs = results.ToDictionary(r => r.Id, r => r.Prs, StringComparer.OrdinalIgnoreCase);
-            _repoUrls = results.ToDictionary(r => r.Id, r => r.RepoUrl, StringComparer.OrdinalIgnoreCase);
-            _prOthersUnknown = results.Where(r => r.OthersUnknown).Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            _prFault = false;
+            _prGate.Release();
         }
     }
 

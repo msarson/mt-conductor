@@ -225,6 +225,36 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public async Task PR_lookups_run_a_few_projects_at_a_time()
+    {
+        var folder = Path.GetTempPath().TrimEnd('\\').Replace("\\", "\\\\");
+        var projects = string.Join(",", Enumerable.Range(1, 12).Select(i =>
+            $$"""{"id":"p{{i}}","name":"P{{i}}","path":"{{folder}}","status":"Active","gitRepoUrl":"https://github.com/o/r{{i}}"}"""));
+        (HttpStatusCode, string)? Route(string pq) => pq == "/api/projects"
+            ? (HttpStatusCode.OK, $$"""{"count":12,"projects":[{{projects}}]}""")
+            : HealthyMt(pq);
+        var running = 0;
+        var peak = 0;
+        var gh = new GhPrClient(TimeSpan.Zero, async (_, _, _) =>
+        {
+            var now = Interlocked.Increment(ref running);
+            int seen;
+            while (now > (seen = Volatile.Read(ref peak)) && Interlocked.CompareExchange(ref peak, now, seen) != seen) { }
+            await Task.Delay(30);
+            Interlocked.Decrement(ref running);
+            return (0, "[]");
+        }, runGhArgs: (_, _) => Task.FromResult((0, "msarson\n")));
+        var poller = new ConductorPoller(
+            new MtApiClient(new HttpClient(new FakeMt(Route)) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) }),
+            gh, new GitRemoteResolver(TimeSpan.FromMinutes(10), (_, _) => Task.FromResult((128, ""))), () => Now);
+
+        await poller.RefreshAsync(CancellationToken.None);
+        await poller.WaitForPrRefreshAsync();
+
+        Assert.InRange(peak, 1, ConductorPoller.MaxConcurrentPrLookups);
+    }
+
+    [Fact]
     public async Task Missing_gh_shows_as_a_warning()
     {
         var mt = new FakeMt(HealthyMt);
