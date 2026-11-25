@@ -472,6 +472,44 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public async Task Open_state_is_read_only_when_MT_advertises_it()
+    {
+        var caps = """["project-open-v1","project-open-state-v1"]""";
+        var (poller, mt, _) = Create(pq => pq switch
+        {
+            "/api/health" => (HttpStatusCode.OK, $$"""{"service":"multiterminal-rest-api","pid":1,"capabilities":{{caps}}}"""),
+            "/api/projects/open-state" => (HttpStatusCode.OK, """{"projects":[{"projectId":"mt","openPanes":1}]}"""),
+            _ => HealthyMt(pq),
+        });
+
+        var card = (await poller.RefreshAsync(CancellationToken.None)).Cards.Single();
+        Assert.True(card.OpenInMt);
+        Assert.True(card.OpenStateExact);
+        Assert.Equal(1, card.OpenPanes);
+
+        caps = """["project-open-v1"]""";   // e.g. MT restarted onto an older build
+        mt.Requests.Clear();
+        card = (await poller.RefreshAsync(CancellationToken.None)).Cards.Single();
+        Assert.False(card.OpenStateExact);
+        Assert.DoesNotContain(mt.Requests, r => r.RequestUri!.AbsolutePath == "/api/projects/open-state");
+    }
+
+    [Fact]
+    public async Task Open_state_failure_falls_back_to_the_guess()
+    {
+        var (poller, _, _) = Create(pq => pq switch
+        {
+            "/api/health" => (HttpStatusCode.OK, """{"service":"multiterminal-rest-api","pid":1,"capabilities":["project-open-state-v1"]}"""),
+            "/api/projects/open-state" => (HttpStatusCode.ServiceUnavailable, """{"detail":"not ready"}"""),
+            _ => HealthyMt(pq),
+        });
+
+        var card = (await poller.RefreshAsync(CancellationToken.None)).Cards.Single();
+        Assert.False(card.OpenStateExact);
+        Assert.True(card.OpenInMt);   // HealthyMt has Bob active on the project
+    }
+
+    [Fact]
     public async Task Offline_open_does_not_change_what_we_know_about_support()
     {
         var (poller, _, _) = Create(pq => pq == "/api/projects/mt/open" ? null : HealthyMt(pq)); // null = connection refused

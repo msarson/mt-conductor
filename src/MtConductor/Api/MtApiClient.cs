@@ -64,6 +64,20 @@ public sealed class MtApiClient
     public Task<MtOwnerProfile?> GetOwnerProfileAsync(CancellationToken ct) =>
         GetAsync<MtOwnerProfile>("api/owner-profile", ct);
 
+    /// <summary>
+    /// Which projects have a PM pane open, as projectId → pane count (only projects with at least
+    /// one). Null when MT can't say (no such route, window not ready, offline).
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, int>?> GetOpenStateAsync(CancellationToken ct)
+    {
+        var state = await GetAsync<MtOpenState>("api/projects/open-state", ct);
+        if (state?.Projects is null) return null;
+        var open = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in state.Projects)
+            if (!string.IsNullOrEmpty(p.ProjectId) && p.OpenPanes > 0) open[p.ProjectId] = p.OpenPanes;
+        return open;
+    }
+
     public Task<MtRemoteMode?> GetRemoteModeAsync(CancellationToken ct) =>
         GetAsync<MtRemoteMode>("api/remote-mode", ct);
 

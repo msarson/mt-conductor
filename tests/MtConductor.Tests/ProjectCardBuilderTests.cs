@@ -479,4 +479,42 @@ public class ProjectCardBuilderTests
         Assert.Equal(1 + ProjectCardBuilder.TitleListMax + 1, card.AwaitingTestTip!.Count);
         Assert.Equal("+3 more tasks, 6 items", card.AwaitingTestTip[^1]);
     }
+
+    // An active agent on "a"; MT's open-state may say otherwise.
+    private static ConductorSnapshot OpenStateSnapshot(IReadOnlyDictionary<string, int>? openPanes) =>
+        Snapshot(
+            [Project("a", "A", @"C:\a"), Project("b", "B", @"C:\b")],
+            [Task("1", "a", "in_progress", assignee: "Bob", sub: "active")],
+            terminals: [new("t1", "Bob", true, "d1", Now)])
+        with { OpenPanes = openPanes };
+
+    [Fact]
+    public void Without_open_state_an_active_agent_is_the_guess()
+    {
+        var cards = ProjectCardBuilder.Build(OpenStateSnapshot(null)).Cards.ToDictionary(c => c.Id);
+
+        Assert.True(cards["a"].OpenInMt);
+        Assert.False(cards["a"].OpenStateExact);
+        Assert.False(cards["b"].OpenInMt);
+    }
+
+    [Fact]
+    public void Open_state_from_MT_wins_over_the_guess()
+    {
+        // MT says only "b" has panes open: "a"'s agent works without a PM pane (e.g. a helper).
+        var cards = ProjectCardBuilder.Build(OpenStateSnapshot(
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["B"] = 2 })).Cards.ToDictionary(c => c.Id);
+
+        Assert.False(cards["a"].OpenInMt);
+        Assert.True(cards["a"].OpenStateExact);
+        Assert.True(cards["b"].OpenInMt);
+        Assert.Equal(2, cards["b"].OpenPanes);
+    }
+
+    [Fact]
+    public void Empty_open_state_means_nothing_is_open()
+    {
+        var cards = ProjectCardBuilder.Build(OpenStateSnapshot(new Dictionary<string, int>())).Cards;
+        Assert.All(cards, c => Assert.False(c.OpenInMt));
+    }
 }

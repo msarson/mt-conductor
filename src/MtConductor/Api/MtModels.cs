@@ -12,11 +12,22 @@ public sealed record MtHealth(string? Service, string? App, string? Version, int
     /// <summary>Listed by MT builds that have POST /api/projects/{id}/open (ClarionLive/multiterminal#103).</summary>
     public const string ProjectOpenCapability = "project-open-v1";
 
+    /// <summary>Listed by MT builds that have GET /api/projects/open-state (#103).</summary>
+    public const string ProjectOpenStateCapability = "project-open-state-v1";
+
     public bool Has(string capability) =>
         Capabilities?.Contains(capability, StringComparer.OrdinalIgnoreCase) == true;
 }
 
 public sealed record MtProjectList(int Count, List<MtProject> Projects);
+
+/// <summary>
+/// GET /api/projects/open-state: projects open in a PM pane right now (same rule MT's Open uses).
+/// A project that isn't listed has no pane open.
+/// </summary>
+public sealed record MtOpenState(List<MtOpenStateEntry>? Projects);
+
+public sealed record MtOpenStateEntry(string? ProjectId, int OpenPanes);
 
 /// <summary>What MT did with POST /api/projects/{id}/open (ClarionLive/multiterminal#103).</summary>
 public enum MtOpenKind

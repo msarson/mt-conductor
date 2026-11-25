@@ -68,7 +68,11 @@ public sealed class ConductorPoller
             OpenSupported = null;
         }
         if (health.Has(MtHealth.ProjectOpenCapability)) OpenSupported = true;
+        // Only ask for open-state when MT says it has it, so older builds don't log a 404 every tick.
+        _hasOpenState = health.Has(MtHealth.ProjectOpenStateCapability);
     }
+
+    private bool _hasOpenState;
 
     /// <summary>
     /// Re-reads MT's pid just before Open, so a just-restarted MT still gets the right to take
@@ -170,7 +174,10 @@ public sealed class ConductorPoller
         var notificationsTask = _mt.GetUnreadNotificationsAsync(ct);
         var terminalsTask = _mt.GetConnectedTerminalsAsync(ct);
         var remoteTask = _mt.GetRemoteModeAsync(ct);
-        await Task.WhenAll(projectsTask, inProgressTask, todoTask, inboxTask, notificationsTask, terminalsTask, remoteTask);
+        var openStateTask = _hasOpenState
+            ? _mt.GetOpenStateAsync(ct)
+            : Task.FromResult<IReadOnlyDictionary<string, int>?>(null);
+        await Task.WhenAll(projectsTask, inProgressTask, todoTask, inboxTask, notificationsTask, terminalsTask, remoteTask, openStateTask);
 
         if (projectsTask.Result is null)
         {
@@ -245,7 +252,8 @@ public sealed class ConductorPoller
             now,
             gitHubLogin,
             stale,
-            othersUnknown);
+            othersUnknown,
+            openStateTask.Result);
 
         TrackRemote(remoteTask.Result?.RemoteMode, now);
         return ProjectCardBuilder.Build(snapshot) with

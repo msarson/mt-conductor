@@ -18,7 +18,8 @@ public sealed record ConductorSnapshot(
     DateTime Now,
     string? GitHubLogin = null,    // gh's logged-in user; PRs by others are counted, not listed
     IReadOnlyList<string>? StaleSources = null,
-    IReadOnlySet<string>? PrOthersUnknown = null);   // project ids whose list of others' PRs couldn't be read   // sources that failed this tick (last good data reused)
+    IReadOnlySet<string>? PrOthersUnknown = null,   // project ids whose list of others' PRs couldn't be read
+    IReadOnlyDictionary<string, int>? OpenPanes = null);  // MT's open-state: projectId -> PM panes open; null = MT can't say
 
 public sealed record PrBadge(int Number, string Title, string Url, string Checks, bool IsDraft, string? Review);
 
@@ -49,7 +50,11 @@ public sealed record ProjectCard(
     IReadOnlyList<string>? ReasonDetails = null,
     string? PrRepo = null,                              // owner/repo the PRs come from (for the PR line's tooltip)
     string? GitHubLogin = null,                         // gh login "yours" means; null = unknown
-    bool OthersKnown = true);                           // false: only your PRs could be read, others' are unknown        // parallel to NeedsYouReasons: hover text, "" when there is none
+    bool OthersKnown = true,                            // false: only your PRs could be read, others' are unknown
+    // Is the project open in an MT pane? Drives the button label ("Switch to" / "Open").
+    bool OpenInMt = false,
+    int OpenPanes = 0,                                  // PM panes open, when MT says (OpenStateExact)
+    bool OpenStateExact = false);                       // true: from MT's open-state; false: guessed from an active agent
 
 public sealed record ConductorView(
     bool MtOnline,
@@ -227,6 +232,10 @@ public static class ProjectCardBuilder
             otherPrs = prList.Count - prs.Count;
         }
 
+        // MT's open-state is exact; without it (older MT), an agent with an active task here is
+        // the best guess that a pane has the project open.
+        var openPanes = s.OpenPanes?.GetValueOrDefault(p.Id) ?? 0;
+
         var openHint = activeAgents.Count > 0
             ? $"Probably open: {string.Join(", ", activeAgents)} {(activeAgents.Count == 1 ? "is" : "are")} working on an active task here. MT can't yet say which window."
             : "MT doesn't report which window a project is in yet.";
@@ -257,7 +266,10 @@ public static class ProjectCardBuilder
             ReasonDetails: reasonDetails,
             PrRepo: GhPrClient.ParseOwnerRepo(p.GitRepoUrl),
             GitHubLogin: s.GitHubLogin,
-            OthersKnown: s.PrOthersUnknown?.Contains(p.Id) != true);
+            OthersKnown: s.PrOthersUnknown?.Contains(p.Id) != true,
+            OpenInMt: openPanes > 0 || (s.OpenPanes is null && activeAgents.Count > 0),
+            OpenPanes: openPanes,
+            OpenStateExact: s.OpenPanes is not null);
     }
 
     /// <summary>

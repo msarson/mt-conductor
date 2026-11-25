@@ -230,9 +230,15 @@
     st = openState.get(card.id);
 
     openBtn.disabled = !!(st && (st.pendingSince || st.launchingSince || (st.busyUntil && now < st.busyUntil)));
-    openBtn.title = card.activeAgents.length > 0
-      ? "Open in MT: brings up the pane that has this project open"
-      : "Open in MT: starts this project the way its launch setting says (new, continue or ask)";
+    // Same request either way; the label says what MT will most likely do.
+    openBtn.textContent = card.openInMt ? "Switch to" : "Open";
+    if (!card.openInMt) {
+      openBtn.title = "Open in MT: starts this project the way its launch setting says (new, continue or ask)";
+    } else if (card.openStateExact) {
+      openBtn.title = `Switch to it in MT: open in ${plural(card.openPanes, "pane", "panes")}, brings up the first`;
+    } else {
+      openBtn.title = "Switch to it in MT: an agent is working on it, so it's probably open (this MT can't say for sure)";
+    }
     showHint(hint, text);
 
     openBtn.addEventListener("click", () => {
