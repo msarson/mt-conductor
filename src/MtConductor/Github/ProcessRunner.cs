@@ -30,6 +30,7 @@ internal static class ProcessRunner
             psi.ArgumentList.Add(arg);
         psi.Environment["GIT_CONFIG_COUNT"] = "0";
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        psi.Environment["GIT_CONFIG_NOSYSTEM"] = "1";   // no system-wide git config (harmless for gh)
         psi.Environment["MULTITERMINAL_GH_SIGN"] = "0";
         psi.Environment["GH_PROMPT_DISABLED"] = "1";
         psi.Environment["NO_COLOR"] = "1";

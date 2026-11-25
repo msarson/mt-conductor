@@ -8,13 +8,13 @@ public class GitRemoteResolverTests
     public async Task Upstream_remote_wins_over_origin_for_forks()
     {
         var calls = new List<string>();
-        var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), (req, _) =>
+        var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), FakeGit.Remotes(remote =>
         {
-            calls.Add(req.Remote);
-            return Task.FromResult(req.Remote == "upstream"
+            calls.Add(remote);
+            return remote == "upstream"
                 ? (0, "https://github.com/ClarionLive/multiterminal.git\n")
-                : (0, "https://github.com/msarson/multiterminal.git\n"));
-        });
+                : (0, "https://github.com/msarson/multiterminal.git\n");
+        }));
 
         var url = await resolver.GetRepoUrlAsync(Path.GetTempPath(), CancellationToken.None);
 
@@ -25,8 +25,8 @@ public class GitRemoteResolverTests
     [Fact]
     public async Task Origin_used_when_there_is_no_upstream()
     {
-        var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), (req, _) =>
-            Task.FromResult(req.Remote == "origin" ? (0, "https://github.com/me/x\n") : (2, "")));
+        var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), FakeGit.Remotes(remote =>
+            remote == "origin" ? (0, "https://github.com/me/x\n") : (2, "")));
         Assert.Equal("https://github.com/me/x", await resolver.GetRepoUrlAsync(Path.GetTempPath(), CancellationToken.None));
     }
 
@@ -37,6 +37,46 @@ public class GitRemoteResolverTests
         Assert.Null(await resolver.GetRepoUrlAsync(@"Z:\definitely\not\here", CancellationToken.None));
         Assert.Null(await resolver.GetRepoUrlAsync(Path.GetTempPath(), CancellationToken.None));
         Assert.Null(await resolver.GetRepoUrlAsync(null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_folder_inside_another_repo_does_not_borrow_its_remote()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "mono", "sub");   // need not exist for the root check, but must for the resolver
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var calls = new List<string>();
+            var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), FakeGit.Remotes(remote =>
+            {
+                calls.Add(remote);
+                return (0, "https://github.com/o/mono\n");
+            }, topLevel: Path.Combine(Path.GetTempPath(), "mono")));
+
+            Assert.Null(await resolver.GetRepoUrlAsync(folder, CancellationToken.None));
+            Assert.Empty(calls);   // never even asked for a remote
+        }
+        finally
+        {
+            Directory.Delete(Path.Combine(Path.GetTempPath(), "mono"), recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Repo_root_matches_whatever_the_slashes_and_case()
+    {
+        var path = Path.GetTempPath().TrimEnd('\\');
+        var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), FakeGit.Remotes(
+            _ => (0, "https://github.com/o/r\n"), topLevel: path.ToUpperInvariant().Replace('\\', '/')));
+
+        Assert.Equal("https://github.com/o/r", await resolver.GetRepoUrlAsync(path, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Git_failing_on_rev_parse_means_no_repo()
+    {
+        var resolver = new GitRemoteResolver(TimeSpan.FromMinutes(1), (_, _) => Task.FromResult((128, "")));
+        Assert.Null(await resolver.GetRepoUrlAsync(Path.GetTempPath(), CancellationToken.None));
     }
 
     [Theory]

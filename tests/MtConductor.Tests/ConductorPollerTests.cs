@@ -38,7 +38,7 @@ public class ConductorPollerTests
         }, runGhArgs: (_, _) => Task.FromResult(login is null ? (1, "") : (0, login + "\n")));
         var client = new MtApiClient(new HttpClient(mt) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) });
         var git = new GitRemoteResolver(TimeSpan.FromMinutes(10),
-            (_, _) => Task.FromResult(originUrl is null ? (128, "") : (0, originUrl + "\n")));
+            originUrl is null ? (_, _) => Task.FromResult((128, "")) : FakeGit.Remotes(_ => (0, originUrl + "\n")));
         return (new ConductorPoller(client, gh, git, () => Now), mt, ghCalls);
     }
 
