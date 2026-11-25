@@ -198,23 +198,16 @@ public static class ProjectCardBuilder
             .ToList();
 
         var questionCount = questions.Count + escalations;
-        var reasons = new List<string>();
-        var reasonDetails = new List<string>();
+        // Text and hover detail travel together so the two lists on the card can't misalign.
+        var reasonPairs = new List<(string Text, string Detail)>();
         if (questions.Count > 0)
-        {
-            reasons.Add(Plural(questions.Count, "recent question or permission request", "recent questions or permission requests"));
-            reasonDetails.Add("");
-        }
+            reasonPairs.Add((Plural(questions.Count, "recent question or permission request", "recent questions or permission requests"), ""));
         if (escalations > 0)
-        {
-            reasons.Add(Plural(escalations, "escalation", "escalations"));
-            reasonDetails.Add("");
-        }
+            reasonPairs.Add((Plural(escalations, "escalation", "escalations"), ""));
         if (awaitingTest > 0)
-        {
-            reasons.Add(Plural(awaitingTest, "item ready for you to test", "items ready for you to test"));
-            reasonDetails.Add(string.Join("\n", awaitingTitles));
-        }
+            reasonPairs.Add((Plural(awaitingTest, "item ready for you to test", "items ready for you to test"), string.Join("\n", awaitingTitles)));
+        var reasons = reasonPairs.Select(r => r.Text).ToList();
+        var reasonDetails = reasonPairs.Select(r => r.Detail).ToList();
 
         var (leftOff, leftOffAt) = LeftOff(p, s, inProgress);
 
