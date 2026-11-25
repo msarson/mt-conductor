@@ -183,6 +183,29 @@ public class ConductorPollerTests
     }
 
     [Fact]
+    public async Task A_faulting_PR_refresh_warns_in_the_view_and_recovers_next_time()
+    {
+        var fail = true;
+        var mt = new FakeMt(HealthyMt);
+        var gh = new GhPrClient(TimeSpan.Zero, (_, _, _) =>
+            fail ? throw new NotSupportedException("boom") : Task.FromResult((0, $"[{MyPr}]")),
+            runGhArgs: (_, _) => Task.FromResult((0, "msarson\n")));
+        var poller = new ConductorPoller(
+            new MtApiClient(new HttpClient(mt) { BaseAddress = new Uri(MtApiClient.DefaultBaseAddress) }),
+            gh, new GitRemoteResolver(TimeSpan.FromMinutes(10), (_, _) => Task.FromResult((128, ""))), () => Now);
+
+        await poller.RefreshAsync(CancellationToken.None);
+        await poller.WaitForPrRefreshAsync();
+        Assert.Contains("PRs unavailable", (await poller.RefreshAsync(CancellationToken.None)).Warnings!);
+
+        fail = false;
+        await poller.WaitForPrRefreshAsync();
+        await poller.RefreshAsync(CancellationToken.None);   // starts the next background refresh
+        await poller.WaitForPrRefreshAsync();
+        Assert.DoesNotContain("PRs unavailable", (await poller.RefreshAsync(CancellationToken.None)).Warnings!);
+    }
+
+    [Fact]
     public void MergePrs_keeps_one_entry_per_number_and_null_only_when_both_failed()
     {
         PullRequestInfo Pr(int n, string? author) => new(n, "t", "u", false, "none", null, author);

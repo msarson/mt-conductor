@@ -31,6 +31,7 @@ public sealed class ConductorPoller
     private Dictionary<string, IReadOnlyList<PullRequestInfo>?> _prs = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, string?> _repoUrls = new(StringComparer.OrdinalIgnoreCase);
     private string? _gitHubLogin;
+    private bool _prFault;   // the last background PR refresh threw: shown as a warning, last good PRs kept
 
     private IReadOnlyList<MtTask> _lastTasks = [];
     private bool _haveTasks;
@@ -194,12 +195,16 @@ public sealed class ConductorPoller
         Dictionary<string, IReadOnlyList<PullRequestInfo>?> prs;
         Dictionary<string, string?> repoUrls;
         string? gitHubLogin;
+        bool prFault;
         lock (_prLock)
         {
+            prFault = _prFault;
             prs = new(_prs, StringComparer.OrdinalIgnoreCase);
             repoUrls = new(_repoUrls, StringComparer.OrdinalIgnoreCase);
             gitHubLogin = _gitHubLogin;
         }
+
+        if (prFault) stale.Add("PRs unavailable");
 
         // Fill in repos found from the project folders so cards know a repo exists.
         var withRepos = projects
@@ -253,31 +258,55 @@ public sealed class ConductorPoller
         {
             if (_prRefresh is { IsCompleted: false }) return;
             var snapshot = projects.ToList();
-            _prRefresh = Task.Run(async () =>
-            {
-                var login = await _gh.GetViewerLoginAsync(ct);
-                var results = await Task.WhenAll(snapshot.Select(async p =>
-                {
-                    // The folder's own upstream (else origin) remote first: on a fork it points at
-                    // the repo the PRs go to, which MT's gitRepoUrl may not. MT's URL is the fallback.
-                    var folderUrl = await _git.GetRepoUrlAsync(p.SourcePath ?? p.Path, ct);
-                    var repoUrl = GhPrClient.ParseOwnerRepo(folderUrl) is not null
-                        ? folderUrl
-                        : string.IsNullOrWhiteSpace(p.GitRepoUrl) ? null : p.GitRepoUrl;
-                    if (repoUrl is null) return (p.Id, RepoUrl: (string?)null, Prs: (IReadOnlyList<PullRequestInfo>?)null);
+            _prRefresh = RefreshPrsSafelyAsync(snapshot, ct);
+        }
+    }
 
-                    var general = await _gh.GetOpenPrsAsync(repoUrl, ct);
-                    // The general list is capped; ask for the Owner's own PRs separately.
-                    var mine = login is null ? null : await _gh.GetMyOpenPrsAsync(repoUrl, ct);
-                    return (p.Id, RepoUrl: repoUrl, Prs: MergePrs(general, mine, login));
-                }));
-                lock (_prLock)
-                {
-                    _gitHubLogin = login;
-                    _prs = results.ToDictionary(r => r.Id, r => r.Prs, StringComparer.OrdinalIgnoreCase);
-                    _repoUrls = results.ToDictionary(r => r.Id, r => r.RepoUrl, StringComparer.OrdinalIgnoreCase);
-                }
-            }, ct);
+    /// <summary>
+    /// Runs the PR refresh on the thread pool. A bug or unexpected failure must not vanish in an
+    /// unobserved task: it is logged, the last good PRs stay, and the next view warns "PRs unavailable".
+    /// </summary>
+    private async Task RefreshPrsSafelyAsync(List<MtProject> snapshot, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Run(() => RefreshPrsAsync(snapshot, ct), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // shutting down
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"MT Conductor PR refresh failed: {ex}");
+            lock (_prLock) _prFault = true;
+        }
+    }
+
+    private async Task RefreshPrsAsync(List<MtProject> snapshot, CancellationToken ct)
+    {
+        var login = await _gh.GetViewerLoginAsync(ct);
+        var results = await Task.WhenAll(snapshot.Select(async p =>
+        {
+            // The folder's own upstream (else origin) remote first: on a fork it points at
+            // the repo the PRs go to, which MT's gitRepoUrl may not. MT's URL is the fallback.
+            var folderUrl = await _git.GetRepoUrlAsync(p.SourcePath ?? p.Path, ct);
+            var repoUrl = GhPrClient.ParseOwnerRepo(folderUrl) is not null
+                ? folderUrl
+                : string.IsNullOrWhiteSpace(p.GitRepoUrl) ? null : p.GitRepoUrl;
+            if (repoUrl is null) return (p.Id, RepoUrl: (string?)null, Prs: (IReadOnlyList<PullRequestInfo>?)null);
+
+            var general = await _gh.GetOpenPrsAsync(repoUrl, ct);
+            // The general list is capped; ask for the Owner's own PRs separately.
+            var mine = login is null ? null : await _gh.GetMyOpenPrsAsync(repoUrl, ct);
+            return (p.Id, RepoUrl: repoUrl, Prs: MergePrs(general, mine, login));
+        }));
+        lock (_prLock)
+        {
+            _gitHubLogin = login;
+            _prs = results.ToDictionary(r => r.Id, r => r.Prs, StringComparer.OrdinalIgnoreCase);
+            _repoUrls = results.ToDictionary(r => r.Id, r => r.RepoUrl, StringComparer.OrdinalIgnoreCase);
+            _prFault = false;
         }
     }
 
