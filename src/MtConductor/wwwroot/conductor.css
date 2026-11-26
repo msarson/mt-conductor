@@ -141,7 +141,11 @@ body {
 .check-failure { color: var(--needs); }
 .check-pending { color: var(--warn); }
 
-.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* Cards in a grid row stretch to the same height; the free space goes above the last block
+   (the buttons, or the Open hint just above them) so every card's buttons share one line. */
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 6px; }
+.card > .open-hint:not([hidden]) { margin-top: auto; padding-top: 6px; }
+.card > .open-hint:not([hidden]) + .actions { margin-top: 0; }
 button {
   font: inherit;
   font-size: 12px;
