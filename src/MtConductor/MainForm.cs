@@ -26,6 +26,11 @@ public sealed class MainForm : Form
         new GhPrClient(cacheDuration: TimeSpan.FromMinutes(2)),
         new GitRemoteResolver(cacheDuration: TimeSpan.FromMinutes(10)));
 
+    private readonly ConductorSettings _settings = ConductorSettings.CreateDefault();
+    private CardSortOrder _cardOrder;
+    private bool _cardOrderUnsaved;   // the last save failed: shown as a warning until one works
+    private const string CardOrderUnsavedWarning = "card order not saved";
+
     private string? _lastViewJson;
     private ConductorView? _lastView;
     private bool _pageReady;
@@ -39,6 +44,7 @@ public sealed class MainForm : Form
         ClientSize = new Size(960, 760);
         MinimumSize = new Size(420, 300);
         StartPosition = FormStartPosition.CenterScreen;
+        _cardOrder = _settings.LoadCardOrder();
         Controls.Add(_webView);
         Load += async (_, _) => await StartAsync();
         FormClosing += (_, _) => _closing.Cancel();
@@ -128,10 +134,30 @@ public sealed class MainForm : Form
         }
     }
 
+    // Sorts for the Owner's chosen order on the way out; _lastView keeps the builder's order.
     private void Publish(ConductorView view)
     {
-        _lastViewJson = JsonSerializer.Serialize(new { type = "view", view }, MtJson.Options);
+        var sorted = view with { Cards = CardOrder.Apply(view.Cards, _cardOrder) };
+        if (_cardOrderUnsaved)
+            sorted = sorted with { Warnings = [.. view.Warnings ?? [], CardOrderUnsavedWarning] };
+        _lastViewJson = JsonSerializer.Serialize(
+            new { type = "view", view = sorted, cardOrder = CardOrder.Key(_cardOrder) }, MtJson.Options);
         if (_pageReady) _webView.CoreWebView2?.PostWebMessageAsJson(_lastViewJson);
+    }
+
+    /// <summary>
+    /// The header drop-down. Unknown keys are ignored. The cards re-sort first, then the choice is
+    /// saved; if saving fails the status pill says so, and picking any order again retries.
+    /// </summary>
+    private void SetCardOrder(string? key)
+    {
+        if (CardOrder.Parse(key) is not { } order || (order == _cardOrder && !_cardOrderUnsaved)) return;
+        _cardOrder = order;
+        if (_lastView is not null) Publish(_lastView);
+        var unsaved = !_settings.SaveCardOrder(order);
+        if (unsaved == _cardOrderUnsaved) return;
+        _cardOrderUnsaved = unsaved;
+        if (_lastView is not null) Publish(_lastView);   // add or clear the warning
     }
 
     private const string AppOrigin = "https://conductor.local/";
@@ -146,6 +172,7 @@ public sealed class MainForm : Form
         string? type;
         string? url = null;
         string? projectId = null;
+        string? order = null;
         try
         {
             using var doc = JsonDocument.Parse(e.WebMessageAsJson);
@@ -154,6 +181,7 @@ public sealed class MainForm : Form
             type = root.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
             if (root.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String) url = u.GetString();
             if (root.TryGetProperty("projectId", out var p) && p.ValueKind == JsonValueKind.String) projectId = p.GetString();
+            if (root.TryGetProperty("order", out var o) && o.ValueKind == JsonValueKind.String) order = o.GetString();
         }
         catch (JsonException)
         {
@@ -171,6 +199,9 @@ public sealed class MainForm : Form
                 break;
             case "openProject":
                 _ = OpenProjectAsync(projectId);
+                break;
+            case "setOrder":
+                SetCardOrder(order);
                 break;
         }
     }

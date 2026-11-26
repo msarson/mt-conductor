@@ -54,7 +54,8 @@ public sealed record ProjectCard(
     // Is the project open in an MT pane? Drives the button label ("Switch to" / "Open").
     bool OpenInMt = false,
     int OpenPanes = 0,                                  // PM panes open, when MT says (OpenStateExact)
-    bool OpenStateExact = false);                       // true: from MT's open-state; false: guessed from an active agent
+    bool OpenStateExact = false,                        // true: from MT's open-state; false: guessed from an active agent
+    DateTime? LeftOffAt = null);                        // when LeftOff was written, for the "recently worked on" order
 
 public sealed record ConductorView(
     bool MtOnline,
@@ -152,16 +153,11 @@ public static class ProjectCardBuilder
                 unmatched++;
         }
 
-        var cards = projects
+        // Built in the default order; the host re-sorts for the order the Owner picked.
+        var cards = CardOrder.Apply(projects
             .Select(p => BuildCard(p, s, connected,
                 notificationsByProject.GetValueOrDefault(p.Id) ?? [],
-                escalationsByProject.GetValueOrDefault(p.Id)))
-            .OrderByDescending(c => c.NeedsYou)
-            .ThenByDescending(c => c.ActiveAgents.Count > 0)
-            .ThenByDescending(c => c.IsPinned)
-            .ThenBy(c => string.Equals(c.Status, "Parked", StringComparison.OrdinalIgnoreCase))
-            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+                escalationsByProject.GetValueOrDefault(p.Id))), CardOrder.Default);
 
         var warnings = new List<string>(s.StaleSources ?? []);
         if (s.Inbox is null) warnings.Add("inbox unavailable");
@@ -273,7 +269,8 @@ public static class ProjectCardBuilder
             OthersKnown: s.PrOthersUnknown?.Contains(p.Id) != true,
             OpenInMt: openPanes > 0 || (s.OpenPanes is null && activeAgents.Count > 0),
             OpenPanes: openPanes,
-            OpenStateExact: s.OpenPanes is not null);
+            OpenStateExact: s.OpenPanes is not null,
+            LeftOffAt: leftOffAt);
     }
 
     /// <summary>

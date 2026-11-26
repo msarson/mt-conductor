@@ -12,6 +12,7 @@
   const emptyEl = document.getElementById("empty");
   const unmatchedEl = document.getElementById("unmatched");
   const laterNoteEl = document.getElementById("later-note");
+  const orderEl = document.getElementById("order");
 
   // Which cards have their Open hint expanded, by project id, so refreshes don't collapse them.
   const openHints = new Set();
@@ -345,8 +346,13 @@
   }
 
   if (host) {
+    // The host sorts and saves; the drop-down only says which order is wanted.
+    orderEl.addEventListener("change", () => host.postMessage({ type: "setOrder", order: orderEl.value }));
     host.addEventListener("message", (e) => {
-      if (e.data && e.data.type === "view") render(e.data.view);
+      if (e.data && e.data.type === "view") {
+        if (e.data.cardOrder) orderEl.value = e.data.cardOrder;
+        render(e.data.view);
+      }
       else if (e.data && e.data.type === "openResult") onOpenResult(e.data);
     });
     host.postMessage({ type: "ready" });

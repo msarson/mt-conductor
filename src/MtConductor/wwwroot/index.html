@@ -11,6 +11,15 @@
   <header class="bar">
     <h1>MT Conductor</h1>
     <div class="bar-status">
+      <label class="order" title="The order the cards are shown in. Remembered for next time.">Order
+        <select id="order">
+          <option value="needs-you">Needs you first</option>
+          <option value="name">Name (A–Z)</option>
+          <option value="recent">Recently worked on</option>
+          <option value="open">Open in MT first</option>
+          <option value="tasks">Most tasks</option>
+        </select>
+      </label>
       <span id="remote" class="pill" hidden></span>
       <span id="status" class="pill">Connecting to MultiTerminal…</span>
     </div>

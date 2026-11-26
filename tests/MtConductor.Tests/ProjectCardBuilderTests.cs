@@ -266,6 +266,7 @@ public class ProjectCardBuilderTests
         var card = view.Cards.Single();
         Assert.Equal("Task new: Item 2 in testing, next item 3", card.LeftOff);
         Assert.Equal("5 min ago", card.LeftOffAge);
+        Assert.Equal(Now.AddMinutes(-5), card.LeftOffAt);   // drives the "recently worked on" order
     }
 
     [Theory]
