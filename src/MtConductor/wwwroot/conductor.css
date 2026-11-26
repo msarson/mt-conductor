@@ -94,6 +94,18 @@ body {
 }
 .cards.stale { opacity: 0.55; }
 
+/* Spans the whole grid row, so a group always starts on a new line. */
+.group-head {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.group-head:first-child { margin-top: 0; }
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);

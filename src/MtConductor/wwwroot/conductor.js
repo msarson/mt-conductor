@@ -19,6 +19,7 @@
   let hasCards = false;
   let lastView = null;      // last online view (what the cards show)
   let currentView = null;   // last view of any kind
+  let viewOrder = null;     // the host's card order for the views it sends ("open" adds group headings)
 
   const LAST_GOOD_WARNING = "showing last good view";   // pinned by ProjectCardBuilder.RefreshFailed
   const CHECK_GLYPH = { success: "✓", failure: "✗", pending: "…", none: "" };
@@ -293,6 +294,27 @@
     if (lastView && currentView === lastView) render(lastView);
   }
 
+  // The card elements, with a full-width heading above each group when the order groups them.
+  // The host has already sorted open-in-MT cards first, so each group is one run of cards.
+  function withGroupHeads(cards) {
+    if (viewOrder !== "open") return cards.map(renderCard);
+    // An MT without open-state only lets us guess from active agents: say so in the heading.
+    const exact = cards.every((c) => c.openStateExact);
+    const groups = [
+      [exact ? "Opened in MT" : "Probably opened in MT", cards.filter((c) => c.openInMt)],
+      [exact ? "Currently not opened" : "Probably not opened", cards.filter((c) => !c.openInMt)],
+    ];
+    const out = [];
+    for (const [title, group] of groups) {
+      if (group.length === 0) continue;
+      const head = document.createElement("h2");
+      head.className = "group-head";
+      head.textContent = `${title} · ${group.length}`;
+      out.push(head, ...group.map(renderCard));
+    }
+    return out;
+  }
+
   function render(view) {
     currentView = view;
     offlineEl.hidden = view.mtOnline;
@@ -335,7 +357,7 @@
     }
     lastView = view;
 
-    cardsEl.replaceChildren(...view.cards.map(renderCard));
+    cardsEl.replaceChildren(...withGroupHeads(view.cards));
     hasCards = view.cards.length > 0;
     emptyEl.hidden = hasCards;
     laterNoteEl.hidden = !hasCards;   // explains the two greyed-out buttons once, not on every card
@@ -350,7 +372,9 @@
     orderEl.addEventListener("change", () => host.postMessage({ type: "setOrder", order: orderEl.value }));
     host.addEventListener("message", (e) => {
       if (e.data && e.data.type === "view") {
-        if (e.data.cardOrder) orderEl.value = e.data.cardOrder;
+        // The order the host sorted this view by (the select may already show a newer pick).
+        viewOrder = e.data.cardOrder || null;
+        if (viewOrder) orderEl.value = viewOrder;
         render(e.data.view);
       }
       else if (e.data && e.data.type === "openResult") onOpenResult(e.data);
