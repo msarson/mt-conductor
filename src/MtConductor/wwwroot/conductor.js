@@ -300,16 +300,17 @@
     if (viewOrder !== "open") return cards.map(renderCard);
     // An MT without open-state only lets us guess from active agents: say so in the heading.
     const exact = cards.every((c) => c.openStateExact);
+    const maybe = exact ? "" : "probably ";
     const groups = [
-      [exact ? "Opened in MT" : "Probably opened in MT", cards.filter((c) => c.openInMt)],
-      [exact ? "Currently not opened" : "Probably not opened", cards.filter((c) => !c.openInMt)],
+      [`${maybe}opened in MT`, cards.filter((c) => c.openInMt)],
+      [`${maybe}not opened in MT`, cards.filter((c) => !c.openInMt)],
     ];
     const out = [];
     for (const [title, group] of groups) {
       if (group.length === 0) continue;
       const head = document.createElement("h2");
       head.className = "group-head";
-      head.textContent = `${title} · ${group.length}`;
+      head.textContent = `${plural(group.length, "Project", "Projects")} ${title}`;   // "3 Projects opened in MT"
       out.push(head, ...group.map(renderCard));
     }
     return out;
